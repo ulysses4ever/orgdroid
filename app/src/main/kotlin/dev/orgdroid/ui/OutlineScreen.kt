@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.orgdroid.org.Node
 import dev.orgdroid.org.NodeId
+import dev.orgdroid.org.TreeOps
 import dev.orgdroid.outline.OutlineViewModel
 
 private data class RenderItem(
@@ -40,22 +42,40 @@ private data class RenderItem(
     val depth: Int,
     val hasChildren: Boolean,
     val isCollapsed: Boolean,
+    val canIndent: Boolean,
+    val canOutdent: Boolean,
 )
 
-private fun flatten(root: Node?, collapsed: Set<NodeId>): List<RenderItem> {
+private fun flatten(
+    root: Node?,
+    collapsed: Set<NodeId>,
+    focusedRoot: NodeId?,
+): List<RenderItem> {
     if (root == null) return emptyList()
+    val startNode = if (focusedRoot != null) TreeOps.findNode(root, focusedRoot) else root
+    if (startNode == null) return emptyList()
+
     val out = mutableListOf<RenderItem>()
-    fun visit(node: Node, depth: Int) {
+    fun visit(parent: Node, node: Node, indexInParent: Int, depth: Int) {
         val isCollapsed = node.id in collapsed
-        if (node.level > 0) {
-            out.add(RenderItem(node, depth, node.children.isNotEmpty(), isCollapsed))
+        if (node.id != startNode.id) {
+            out.add(
+                RenderItem(
+                    node = node,
+                    depth = depth,
+                    hasChildren = node.children.isNotEmpty(),
+                    isCollapsed = isCollapsed,
+                    canIndent = indexInParent > 0,
+                    canOutdent = parent.id != startNode.id,
+                )
+            )
         }
         if (!isCollapsed) {
-            val childDepth = if (node.level == 0) 0 else depth + 1
-            for (child in node.children) visit(child, childDepth)
+            val childDepth = if (node.id == startNode.id) 0 else depth + 1
+            for ((i, c) in node.children.withIndex()) visit(node, c, i, childDepth)
         }
     }
-    visit(root, 0)
+    visit(startNode, startNode, -1, 0)
     return out
 }
 
@@ -68,8 +88,8 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) vm.open(uri) }
 
-    val items by remember(state.root, state.collapsed) {
-        derivedStateOf { flatten(state.root, state.collapsed) }
+    val items by remember(state.root, state.collapsed, state.focusedRoot) {
+        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot) }
     }
 
     val listState = rememberLazyListState()
@@ -85,7 +105,22 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
             TopAppBar(
                 title = {
                     val name = state.fileName ?: "orgdroid"
-                    Text(if (state.dirty) "$name •" else name)
+                    val focusedTitle = state.focusedRoot?.let { id ->
+                        state.root?.let { TreeOps.findNode(it, id)?.title }
+                    }
+                    val display = when {
+                        focusedTitle == null -> name
+                        focusedTitle.isEmpty() -> "(untitled)"
+                        else -> focusedTitle
+                    }
+                    Text(if (state.dirty && state.focusedRoot == null) "$display •" else display)
+                },
+                navigationIcon = {
+                    if (state.focusedRoot != null) {
+                        IconButton(onClick = { vm.zoomOut() }) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Zoom out")
+                        }
+                    }
                 },
                 actions = {
                     TextButton(onClick = {
@@ -100,7 +135,7 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         },
         floatingActionButton = {
             if (state.root != null) {
-                FloatingActionButton(onClick = { vm.appendTopLevel() }) {
+                FloatingActionButton(onClick = { vm.appendInScope() }) {
                     Icon(Icons.Filled.Add, contentDescription = "New heading")
                 }
             }
@@ -127,6 +162,9 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                             onCommitEdit = { vm.commitEdit() },
                             onEnterCreatesSibling = { vm.createSiblingAfter(item.node.id) },
                             onDelete = { vm.delete(item.node.id) },
+                            onIndent = { vm.indent(item.node.id) },
+                            onOutdent = { vm.outdent(item.node.id) },
+                            onZoomIn = { vm.zoomIn(item.node.id) },
                         )
                     }
                 }
@@ -155,6 +193,9 @@ private fun OutlineRow(
     onCommitEdit: () -> Unit,
     onEnterCreatesSibling: () -> Unit,
     onDelete: () -> Unit,
+    onIndent: () -> Unit,
+    onOutdent: () -> Unit,
+    onZoomIn: () -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(editing) {
@@ -207,18 +248,27 @@ private fun OutlineRow(
                     )
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
+                            text = { Text("Indent") },
+                            enabled = item.canIndent,
+                            onClick = { menuOpen = false; onIndent() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Outdent") },
+                            enabled = item.canOutdent,
+                            onClick = { menuOpen = false; onOutdent() },
+                        )
+                        DropdownMenuItem(
                             text = { Text("New sibling") },
-                            onClick = {
-                                menuOpen = false
-                                onEnterCreatesSibling()
-                            },
+                            onClick = { menuOpen = false; onEnterCreatesSibling() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Zoom in") },
+                            enabled = item.hasChildren,
+                            onClick = { menuOpen = false; onZoomIn() },
                         )
                         DropdownMenuItem(
                             text = { Text("Delete") },
-                            onClick = {
-                                menuOpen = false
-                                onDelete()
-                            },
+                            onClick = { menuOpen = false; onDelete() },
                         )
                     }
                 }

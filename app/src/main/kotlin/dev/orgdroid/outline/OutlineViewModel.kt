@@ -29,6 +29,7 @@ data class OutlineState(
     val editBuffer: String = "",
     val dirty: Boolean = false,
     val conflictPending: Boolean = false,
+    val focusedRoot: NodeId? = null,
 )
 
 class OutlineViewModel(app: Application) : AndroidViewModel(app) {
@@ -113,11 +114,32 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun appendTopLevel() {
+    fun appendInScope() {
         val s = _state.value
         val committed = commitEditInternal(s)
         val root = committed.root ?: return
-        val (newRoot, newId) = TreeOps.appendTopLevel(root, nextNodeIdValue++)
+        val (newRoot, newId) = if (committed.focusedRoot != null) {
+            val focused = TreeOps.findNode(root, committed.focusedRoot!!) ?: return
+            val newId = NodeId(nextNodeIdValue++)
+            val newNode = Node(
+                id = newId,
+                level = focused.level + 1,
+                title = "",
+                todoState = null,
+                priority = null,
+                tags = emptyList(),
+                notes = emptyList(),
+                children = emptyList(),
+                rawHeadingLine = null,
+                trailingBlankLines = 0,
+            )
+            val updated = TreeOps.transform(root, focused.id) {
+                it.copy(children = it.children + newNode)
+            }
+            updated to newId
+        } else {
+            TreeOps.appendTopLevel(root, nextNodeIdValue++)
+        }
         _state.value = committed.copy(
             root = newRoot,
             dirty = true,
@@ -131,13 +153,48 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         if (root.id == id) return
         val newRoot = TreeOps.delete(root, id)
+        val validFocused = s.focusedRoot?.takeIf { TreeOps.findNode(newRoot, it) != null }
         _state.value = s.copy(
             root = newRoot,
             dirty = true,
             editing = if (s.editing == id) null else s.editing,
             editBuffer = if (s.editing == id) "" else s.editBuffer,
             collapsed = s.collapsed - id,
+            focusedRoot = validFocused,
         )
+    }
+
+    fun indent(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        val newRoot = TreeOps.indent(root, id)
+        if (newRoot === root) return
+        _state.value = s.copy(root = newRoot, dirty = true)
+    }
+
+    fun outdent(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        val newRoot = TreeOps.outdent(root, id, focusedRoot = s.focusedRoot)
+        if (newRoot === root) return
+        _state.value = s.copy(root = newRoot, dirty = true)
+    }
+
+    fun zoomIn(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        val node = TreeOps.findNode(root, id) ?: return
+        if (node.children.isEmpty()) return
+        _state.value = s.copy(focusedRoot = id)
+    }
+
+    fun zoomOut() {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        val current = s.focusedRoot ?: return
+        val parent = TreeOps.findParentAndIndex(root, current)?.first
+        val newFocus = if (parent == null || parent.id == root.id) null else parent.id
+        _state.value = s.copy(focusedRoot = newFocus)
     }
 
     fun save() {

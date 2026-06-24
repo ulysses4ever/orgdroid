@@ -96,4 +96,49 @@ object TreeOps {
         }
         return max
     }
+
+    fun findParentAndIndex(root: Node, id: NodeId): Pair<Node, Int>? {
+        for ((i, c) in root.children.withIndex()) {
+            if (c.id == id) return root to i
+            val sub = findParentAndIndex(c, id)
+            if (sub != null) return sub
+        }
+        return null
+    }
+
+    private fun bumpLevels(node: Node, delta: Int): Node = node.copy(
+        level = node.level + delta,
+        rawHeadingLine = null,
+        children = node.children.map { bumpLevels(it, delta) },
+    )
+
+    fun indent(root: Node, id: NodeId): Node {
+        val (parent, idx) = findParentAndIndex(root, id) ?: return root
+        if (idx == 0) return root
+        val node = parent.children[idx]
+        val prev = parent.children[idx - 1]
+        val bumped = bumpLevels(node, +1)
+        val newChildren = parent.children.toMutableList().apply {
+            set(idx - 1, prev.copy(children = prev.children + bumped))
+            removeAt(idx)
+        }
+        return transform(root, parent.id) { it.copy(children = newChildren) }
+    }
+
+    fun outdent(root: Node, id: NodeId, focusedRoot: NodeId? = null): Node {
+        val (parent, idx) = findParentAndIndex(root, id) ?: return root
+        val ceiling = focusedRoot ?: root.id
+        if (parent.id == ceiling) return root
+        val (grandparent, parentIdx) = findParentAndIndex(root, parent.id) ?: return root
+        val node = parent.children[idx]
+        val newParent = parent.copy(
+            children = parent.children.toMutableList().apply { removeAt(idx) }
+        )
+        val bumped = bumpLevels(node, -1)
+        val newGrandChildren = grandparent.children.toMutableList().apply {
+            set(parentIdx, newParent)
+            add(parentIdx + 1, bumped)
+        }
+        return transform(root, grandparent.id) { it.copy(children = newGrandChildren) }
+    }
 }
