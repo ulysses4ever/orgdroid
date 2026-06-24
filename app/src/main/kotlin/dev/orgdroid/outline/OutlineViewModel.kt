@@ -10,6 +10,8 @@ import dev.orgdroid.org.NodeId
 import dev.orgdroid.org.OrgParser
 import dev.orgdroid.org.OrgSerializer
 import dev.orgdroid.org.TreeOps
+import dev.orgdroid.recents.RecentFile
+import dev.orgdroid.recents.RecentFilesStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +34,8 @@ data class OutlineState(
     val dirty: Boolean = false,
     val conflictPending: Boolean = false,
     val focusedRoot: NodeId? = null,
+    val recents: List<RecentFile> = emptyList(),
+    val closePending: Boolean = false,
 )
 
 class OutlineViewModel(app: Application) : AndroidViewModel(app) {
@@ -39,27 +43,86 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<OutlineState> = _state
 
     private var nextNodeIdValue: Long = 1L
+    private val store = RecentFilesStore(app)
+
+    init {
+        val list = store.load()
+        _state.value = _state.value.copy(recents = list)
+        val mostRecent = list.firstOrNull()
+        if (mostRecent != null) {
+            try {
+                open(Uri.parse(mostRecent.uri))
+            } catch (_: Throwable) {
+                // open() surfaces errors via state.error; this catch guards Uri.parse.
+            }
+        }
+    }
 
     fun open(uri: Uri) {
         val resolver = getApplication<Application>().contentResolver
-        FileIo.persistPermission(resolver, uri)
+        try {
+            FileIo.persistPermission(resolver, uri)
+        } catch (_: SecurityException) {
+            // No persistable grant; the subsequent read will fail with a clear error.
+        }
         val name = uri.lastPathSegment?.substringAfterLast('/')
-        _state.value = OutlineState(uri = uri, fileName = name, loading = true)
+        val keepRecents = _state.value.recents
+        _state.value = OutlineState(uri = uri, fileName = name, loading = true, recents = keepRecents)
         viewModelScope.launch {
             try {
                 val text = FileIo.read(resolver, uri)
                 val root = withContext(Dispatchers.Default) { OrgParser.parse(text) }
                 nextNodeIdValue = TreeOps.maxNodeIdValue(root) + 1L
+                val updatedRecents = recordAccess(uri, name)
                 _state.value = OutlineState(
                     uri = uri,
                     fileName = name,
                     root = root,
                     originalText = text,
+                    recents = updatedRecents,
                 )
             } catch (t: Throwable) {
                 _state.value = _state.value.copy(loading = false, error = t.message)
             }
         }
+    }
+
+    private fun recordAccess(uri: Uri, name: String?): List<RecentFile> {
+        val display = name ?: uri.lastPathSegment ?: uri.toString()
+        return store.add(
+            RecentFile(
+                uri = uri.toString(),
+                displayName = display,
+                lastOpenedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    fun removeRecent(uri: String) {
+        val updated = store.remove(uri)
+        _state.value = _state.value.copy(recents = updated)
+    }
+
+    fun closeFile() {
+        val s = commitEditInternal(_state.value)
+        _state.value = s
+        if (s.dirty) {
+            _state.value = s.copy(closePending = true)
+        } else {
+            performClose(s)
+        }
+    }
+
+    fun confirmCloseDiscard() {
+        performClose(_state.value)
+    }
+
+    fun cancelClose() {
+        _state.value = _state.value.copy(closePending = false)
+    }
+
+    private fun performClose(s: OutlineState) {
+        _state.value = OutlineState(recents = s.recents)
     }
 
     fun toggleCollapse(id: NodeId) {
@@ -339,10 +402,12 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val text = withContext(Dispatchers.Default) { OrgSerializer.serialize(root) }
             FileIo.write(resolver, uri, text)
+            val updatedRecents = recordAccess(uri, committed.fileName)
             _state.value = _state.value.copy(
                 originalText = text,
                 dirty = false,
                 saving = false,
+                recents = updatedRecents,
             )
         } catch (t: Throwable) {
             _state.value = _state.value.copy(saving = false, error = t.message)

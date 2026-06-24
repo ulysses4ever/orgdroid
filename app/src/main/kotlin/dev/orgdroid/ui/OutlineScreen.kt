@@ -14,9 +14,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import android.net.Uri
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +38,7 @@ import dev.orgdroid.org.Node
 import dev.orgdroid.org.NodeId
 import dev.orgdroid.org.TreeOps
 import dev.orgdroid.outline.OutlineViewModel
+import dev.orgdroid.recents.RecentFile
 
 private data class RenderItem(
     val node: Node,
@@ -132,6 +135,11 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                     }
                 },
                 actions = {
+                    if (state.root != null || state.uri != null) {
+                        IconButton(onClick = { vm.closeFile() }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close file")
+                        }
+                    }
                     TextButton(onClick = {
                         openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
                     }) { Text("Open") }
@@ -153,12 +161,17 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         Box(Modifier.padding(padding).fillMaxSize()) {
             when {
                 state.loading -> CircularProgressIndicator(Modifier.padding(16.dp))
+                state.root == null -> EmptyState(
+                    recents = state.recents,
+                    error = state.error,
+                    onOpen = { uri -> vm.open(uri) },
+                    onRemove = { uri -> vm.removeRecent(uri) },
+                )
                 state.error != null -> Text(
                     "Error: ${state.error}",
                     Modifier.padding(16.dp),
                     color = MaterialTheme.colorScheme.error,
                 )
-                state.root == null -> Text("No file open. Tap Open.", Modifier.padding(16.dp))
                 else -> LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
                     items(items, key = { it.node.id.value }) { item ->
                         OutlineRow(
@@ -194,6 +207,13 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
             onOverwrite = { vm.confirmOverwrite() },
             onDiscard = { vm.discardLocal() },
             onDismiss = { vm.dismissConflict() },
+        )
+    }
+
+    if (state.closePending) {
+        CloseConfirmDialog(
+            onDiscard = { vm.confirmCloseDiscard() },
+            onCancel = { vm.cancelClose() },
         )
     }
 }
@@ -440,6 +460,92 @@ private fun TagChip(tag: String) {
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
     }
+}
+
+@Composable
+private fun EmptyState(
+    recents: List<RecentFile>,
+    error: String?,
+    onOpen: (Uri) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        if (error != null) {
+            Text(
+                "Error: $error",
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+        if (recents.isEmpty()) {
+            Text("No file open. Tap Open.", Modifier.padding(16.dp))
+        } else {
+            Text(
+                "Recent files",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(recents, key = { it.uri }) { item ->
+                    RecentRow(
+                        item = item,
+                        onOpen = { onOpen(Uri.parse(item.uri)) },
+                        onRemove = { onRemove(item.uri) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecentRow(
+    item: RecentFile,
+    onOpen: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true })
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = item.displayName,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("Remove from recents") },
+                onClick = { menuOpen = false; onRemove() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CloseConfirmDialog(
+    onDiscard: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Discard unsaved changes?") },
+        text = { Text("You have unsaved edits. Closing this file will discard them.") },
+        confirmButton = {
+            TextButton(onClick = onDiscard) { Text("Discard") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
