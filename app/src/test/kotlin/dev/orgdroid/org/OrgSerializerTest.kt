@@ -68,4 +68,25 @@ class OrgSerializerTest {
         val (mutated, _) = TreeOps.appendTopLevel(root, 999L)
         assertEquals("* One\n* \n", OrgSerializer.serialize(mutated))
     }
+
+    @Test fun notesEditRoundTrips() {
+        val input = "* Foo\noriginal body\n"
+        val root = OrgParser.parse(input)
+        val mutated = TreeOps.updateNotes(root, root.children[0].id, listOf("edited", "two lines"))
+        assertEquals("* Foo\nedited\ntwo lines\n", OrgSerializer.serialize(mutated))
+    }
+
+    @Test fun todoStateChangeReconstructsHeading() {
+        val input = "* TODO Foo\n"
+        val root = OrgParser.parse(input)
+        val mutated = TreeOps.updateTodoState(root, root.children[0].id, "DONE")
+        assertEquals("* DONE Foo\n", OrgSerializer.serialize(mutated))
+    }
+
+    @Test fun todoStateRemovalReconstructsHeading() {
+        val input = "* DONE Foo :tag:\n"
+        val root = OrgParser.parse(input)
+        val mutated = TreeOps.updateTodoState(root, root.children[0].id, null)
+        assertEquals("* Foo :tag:\n", OrgSerializer.serialize(mutated))
+    }
 }

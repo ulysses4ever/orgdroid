@@ -27,6 +27,8 @@ data class OutlineState(
     val collapsed: Set<NodeId> = emptySet(),
     val editing: NodeId? = null,
     val editBuffer: String = "",
+    val editingNotes: NodeId? = null,
+    val notesBuffer: String = "",
     val dirty: Boolean = false,
     val conflictPending: Boolean = false,
     val focusedRoot: NodeId? = null,
@@ -70,7 +72,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val s = _state.value
         val root = s.root ?: return
         if (s.editing == id) return
-        val committed = if (s.editing != null) commitEditInternal(s) else s
+        val committed = commitEditInternal(s)
         val node = TreeOps.findNode(committed.root!!, id) ?: return
         _state.value = committed.copy(editing = id, editBuffer = node.title)
     }
@@ -86,19 +88,77 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun commitEditInternal(s: OutlineState): OutlineState {
-        val editingId = s.editing ?: return s
-        val root = s.root ?: return s.copy(editing = null, editBuffer = "")
-        val node = TreeOps.findNode(root, editingId)
-            ?: return s.copy(editing = null, editBuffer = "")
-        if (node.title == s.editBuffer) {
-            return s.copy(editing = null, editBuffer = "")
+        var current = s
+        val editingId = current.editing
+        if (editingId != null) {
+            val root = current.root
+            if (root != null) {
+                val node = TreeOps.findNode(root, editingId)
+                if (node != null && node.title != current.editBuffer) {
+                    current = current.copy(
+                        root = TreeOps.updateTitle(root, editingId, current.editBuffer),
+                        dirty = true,
+                    )
+                }
+            }
+            current = current.copy(editing = null, editBuffer = "")
         }
-        val newRoot = TreeOps.updateTitle(root, editingId, s.editBuffer)
-        return s.copy(root = newRoot, editing = null, editBuffer = "", dirty = true)
+        val notesId = current.editingNotes
+        if (notesId != null) {
+            val root = current.root
+            if (root != null) {
+                val node = TreeOps.findNode(root, notesId)
+                if (node != null) {
+                    val newNotes = if (current.notesBuffer.isEmpty()) emptyList()
+                                   else current.notesBuffer.split('\n')
+                    if (newNotes != node.notes) {
+                        current = current.copy(
+                            root = TreeOps.updateNotes(root, notesId, newNotes),
+                            dirty = true,
+                        )
+                    }
+                }
+            }
+            current = current.copy(editingNotes = null, notesBuffer = "")
+        }
+        return current
     }
 
     fun cancelEdit() {
         _state.value = _state.value.copy(editing = null, editBuffer = "")
+    }
+
+    fun beginEditNotes(id: NodeId) {
+        val s = _state.value
+        val root = s.root ?: return
+        if (s.editingNotes == id) return
+        val committed = commitEditInternal(s)
+        val node = TreeOps.findNode(committed.root!!, id) ?: return
+        val buf = node.notes.joinToString("\n")
+        _state.value = committed.copy(editingNotes = id, notesBuffer = buf)
+    }
+
+    fun onNotesBufferChange(text: String) {
+        val s = _state.value
+        if (s.editingNotes == null) return
+        _state.value = s.copy(notesBuffer = text)
+    }
+
+    fun commitNotes() {
+        _state.value = commitEditInternal(_state.value)
+    }
+
+    fun cancelNotes() {
+        _state.value = _state.value.copy(editingNotes = null, notesBuffer = "")
+    }
+
+    fun cycleTodo(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        TreeOps.findNode(root, id) ?: return
+        val newRoot = TreeOps.cycleTodoState(root, id)
+        if (newRoot === root) return
+        _state.value = s.copy(root = newRoot, dirty = true)
     }
 
     fun createSiblingAfter(id: NodeId) {
@@ -159,6 +219,8 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
             dirty = true,
             editing = if (s.editing == id) null else s.editing,
             editBuffer = if (s.editing == id) "" else s.editBuffer,
+            editingNotes = if (s.editingNotes == id) null else s.editingNotes,
+            notesBuffer = if (s.editingNotes == id) "" else s.notesBuffer,
             collapsed = s.collapsed - id,
             focusedRoot = validFocused,
         )
@@ -237,6 +299,8 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
                     dirty = false,
                     editing = null,
                     editBuffer = "",
+                    editingNotes = null,
+                    notesBuffer = "",
                     collapsed = emptySet(),
                     conflictPending = false,
                 )

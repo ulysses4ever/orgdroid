@@ -141,4 +141,21 @@ object TreeOps {
         }
         return transform(root, grandparent.id) { it.copy(children = newGrandChildren) }
     }
+
+    fun updateTodoState(root: Node, id: NodeId, newState: String?): Node =
+        transform(root, id) { it.copy(todoState = newState, rawHeadingLine = null) }
+
+    fun cycleTodoState(root: Node, id: NodeId): Node {
+        val node = findNode(root, id) ?: return root
+        val next = when (node.todoState) {
+            null -> "TODO"
+            "TODO" -> "DONE"
+            "DONE" -> null
+            else -> null
+        }
+        return updateTodoState(root, id, next)
+    }
+
+    fun updateNotes(root: Node, id: NodeId, newNotes: List<String>): Node =
+        transform(root, id) { it.copy(notes = newNotes) }
 }

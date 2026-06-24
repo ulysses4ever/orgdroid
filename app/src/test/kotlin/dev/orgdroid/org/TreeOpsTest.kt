@@ -179,4 +179,52 @@ class TreeOpsTest {
         assertEquals(2, movedOneA.children[0].level)
         assertNull(movedOneA.children[0].rawHeadingLine)
     }
+
+    @Test fun updateTodoStateClearsRawHeading() {
+        val root = OrgParser.parse("* TODO Foo\n")
+        val one = root.children[0]
+        val newRoot = TreeOps.updateTodoState(root, one.id, "DONE")
+        val updated = TreeOps.findNode(newRoot, one.id)!!
+        assertEquals("DONE", updated.todoState)
+        assertNull(updated.rawHeadingLine)
+    }
+
+    @Test fun updateTodoStateToNullRemovesKeyword() {
+        val root = OrgParser.parse("* DONE Foo\n")
+        val one = root.children[0]
+        val newRoot = TreeOps.updateTodoState(root, one.id, null)
+        val updated = TreeOps.findNode(newRoot, one.id)!!
+        assertNull(updated.todoState)
+        assertEquals("Foo", updated.title)
+    }
+
+    @Test fun cycleTodoStateCyclesAllStates() {
+        val root = OrgParser.parse("* Foo\n")
+        val one = root.children[0]
+        val r1 = TreeOps.cycleTodoState(root, one.id)
+        assertEquals("TODO", TreeOps.findNode(r1, one.id)!!.todoState)
+        val r2 = TreeOps.cycleTodoState(r1, one.id)
+        assertEquals("DONE", TreeOps.findNode(r2, one.id)!!.todoState)
+        val r3 = TreeOps.cycleTodoState(r2, one.id)
+        assertNull(TreeOps.findNode(r3, one.id)!!.todoState)
+    }
+
+    @Test fun updateNotesPreservesRawHeading() {
+        val root = OrgParser.parse("* TODO [#A] Foo :tag:\nbody\n")
+        val one = root.children[0]
+        val before = one.rawHeadingLine
+        assertNotNull(before)
+        val newRoot = TreeOps.updateNotes(root, one.id, listOf("new body"))
+        val updated = TreeOps.findNode(newRoot, one.id)!!
+        assertEquals(listOf("new body"), updated.notes)
+        assertEquals(before, updated.rawHeadingLine)
+    }
+
+    @Test fun updateNotesEmptyListRemovesBody() {
+        val root = OrgParser.parse("* Foo\nbody1\nbody2\n")
+        val one = root.children[0]
+        val newRoot = TreeOps.updateNotes(root, one.id, emptyList())
+        val updated = TreeOps.findNode(newRoot, one.id)!!
+        assertTrue(updated.notes.isEmpty())
+    }
 }

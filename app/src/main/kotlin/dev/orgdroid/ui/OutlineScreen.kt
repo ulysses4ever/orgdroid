@@ -99,6 +99,11 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         val idx = items.indexOfFirst { it.node.id == id }
         if (idx >= 0) listState.animateScrollToItem(idx)
     }
+    LaunchedEffect(state.editingNotes) {
+        val id = state.editingNotes ?: return@LaunchedEffect
+        val idx = items.indexOfFirst { it.node.id == id }
+        if (idx >= 0) listState.animateScrollToItem(idx)
+    }
 
     Scaffold(
         topBar = {
@@ -156,6 +161,8 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                             item = item,
                             editing = state.editing == item.node.id,
                             editBuffer = state.editBuffer,
+                            editingNotes = state.editingNotes == item.node.id,
+                            notesBuffer = state.notesBuffer,
                             onToggle = { vm.toggleCollapse(item.node.id) },
                             onBeginEdit = { vm.beginEdit(item.node.id) },
                             onEditChange = vm::onEditBufferChange,
@@ -165,6 +172,10 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                             onIndent = { vm.indent(item.node.id) },
                             onOutdent = { vm.outdent(item.node.id) },
                             onZoomIn = { vm.zoomIn(item.node.id) },
+                            onCycleTodo = { vm.cycleTodo(item.node.id) },
+                            onBeginEditNotes = { vm.beginEditNotes(item.node.id) },
+                            onNotesChange = vm::onNotesBufferChange,
+                            onCommitNotes = { vm.commitNotes() },
                         )
                     }
                 }
@@ -187,6 +198,8 @@ private fun OutlineRow(
     item: RenderItem,
     editing: Boolean,
     editBuffer: String,
+    editingNotes: Boolean,
+    notesBuffer: String,
     onToggle: () -> Unit,
     onBeginEdit: () -> Unit,
     onEditChange: (String) -> Unit,
@@ -196,10 +209,18 @@ private fun OutlineRow(
     onIndent: () -> Unit,
     onOutdent: () -> Unit,
     onZoomIn: () -> Unit,
+    onCycleTodo: () -> Unit,
+    onBeginEditNotes: () -> Unit,
+    onNotesChange: (String) -> Unit,
+    onCommitNotes: () -> Unit,
 ) {
-    val focusRequester = remember { FocusRequester() }
+    val titleFocusRequester = remember { FocusRequester() }
+    val notesFocusRequester = remember { FocusRequester() }
     LaunchedEffect(editing) {
-        if (editing) focusRequester.requestFocus()
+        if (editing) titleFocusRequester.requestFocus()
+    }
+    LaunchedEffect(editingNotes) {
+        if (editingNotes) notesFocusRequester.requestFocus()
     }
 
     Column(
@@ -228,7 +249,7 @@ private fun OutlineRow(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .focusRequester(focusRequester),
+                            .focusRequester(titleFocusRequester),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(
@@ -245,6 +266,7 @@ private fun OutlineRow(
                         node = item.node,
                         onClick = onBeginEdit,
                         onLongClick = { menuOpen = true },
+                        onCycleTodo = onCycleTodo,
                     )
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
@@ -262,6 +284,14 @@ private fun OutlineRow(
                             onClick = { menuOpen = false; onEnterCreatesSibling() },
                         )
                         DropdownMenuItem(
+                            text = { Text("Toggle TODO") },
+                            onClick = { menuOpen = false; onCycleTodo() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (item.node.notes.isEmpty()) "Add notes" else "Edit notes") },
+                            onClick = { menuOpen = false; onBeginEditNotes() },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Zoom in") },
                             enabled = item.hasChildren,
                             onClick = { menuOpen = false; onZoomIn() },
@@ -274,13 +304,31 @@ private fun OutlineRow(
                 }
             }
         }
-        if (item.node.notes.isNotEmpty()) {
+        if (editingNotes) {
+            BasicTextField(
+                value = notesBuffer,
+                onValueChange = onNotesChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 32.dp, top = 2.dp)
+                    .focusRequester(notesFocusRequester),
+                singleLine = false,
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            )
+        } else if (item.node.notes.isNotEmpty()) {
             Text(
                 text = item.node.notes.joinToString("\n"),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 32.dp, top = 2.dp),
+                modifier = Modifier
+                    .padding(start = 32.dp, top = 2.dp)
+                    .clickable { onBeginEditNotes() },
             )
         }
     }
@@ -292,6 +340,7 @@ private fun TitleRow(
     node: Node,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onCycleTodo: () -> Unit,
 ) {
     Row(
         Modifier
@@ -300,7 +349,7 @@ private fun TitleRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        node.todoState?.let { TodoChip(it) }
+        node.todoState?.let { TodoChip(it, onCycleTodo) }
         node.priority?.let { PriorityChip(it) }
         Text(
             text = node.title.ifEmpty { "(untitled)" },
@@ -338,11 +387,15 @@ private fun Bullet(hasChildren: Boolean, isCollapsed: Boolean, onClick: () -> Un
 }
 
 @Composable
-private fun TodoChip(text: String) {
+private fun TodoChip(text: String, onClick: () -> Unit) {
     val isDone = text == "DONE"
     val bg = if (isDone) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
     val fg = if (isDone) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onErrorContainer
-    Surface(shape = RoundedCornerShape(4.dp), color = bg) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = bg,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
         Text(text, fontSize = 10.sp, color = fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
     }
 }
