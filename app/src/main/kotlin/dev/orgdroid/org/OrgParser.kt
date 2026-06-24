@@ -61,7 +61,14 @@ object OrgParser {
             var inDrawer = false
             var inBlock: String? = null
 
-            for (rawLine in text.lineSequence()) {
+            // lineSequence() on a string ending with '\n' yields a trailing empty segment
+            // that represents the file terminator, not a blank line. Drop it.
+            val seq = when {
+                text.isEmpty() -> emptySequence()
+                text.endsWith('\n') -> text.dropLast(1).lineSequence()
+                else -> text.lineSequence()
+            }
+            for (rawLine in seq) {
                 val line = if (rawLine.endsWith('\r')) rawLine.dropLast(1) else rawLine
 
                 if (inDrawer) {

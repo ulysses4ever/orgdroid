@@ -3,18 +3,30 @@ package dev.orgdroid.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,10 +42,6 @@ private data class RenderItem(
     val isCollapsed: Boolean,
 )
 
-/**
- * DFS over the tree, skipping subtrees whose root id is in `collapsed`.
- * The synthetic root (level 0) is not rendered; its children become depth 0.
- */
 private fun flatten(root: Node?, collapsed: Set<NodeId>): List<RenderItem> {
     if (root == null) return emptyList()
     val out = mutableListOf<RenderItem>()
@@ -64,17 +72,39 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         derivedStateOf { flatten(state.root, state.collapsed) }
     }
 
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(state.editing) {
+        val id = state.editing ?: return@LaunchedEffect
+        val idx = items.indexOfFirst { it.node.id == id }
+        if (idx >= 0) listState.animateScrollToItem(idx)
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.fileName ?: "orgdroid") },
+                title = {
+                    val name = state.fileName ?: "orgdroid"
+                    Text(if (state.dirty) "$name •" else name)
+                },
                 actions = {
                     TextButton(onClick = {
                         openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
                     }) { Text("Open") }
+                    TextButton(
+                        onClick = { vm.save() },
+                        enabled = state.dirty && !state.saving,
+                    ) { Text(if (state.saving) "Saving…" else "Save") }
                 }
             )
-        }
+        },
+        floatingActionButton = {
+            if (state.root != null) {
+                FloatingActionButton(onClick = { vm.appendTopLevel() }) {
+                    Icon(Icons.Filled.Add, contentDescription = "New heading")
+                }
+            }
+        },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when {
@@ -85,18 +115,52 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                     color = MaterialTheme.colorScheme.error,
                 )
                 state.root == null -> Text("No file open. Tap Open.", Modifier.padding(16.dp))
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                else -> LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
                     items(items, key = { it.node.id.value }) { item ->
-                        OutlineRow(item, onToggle = { vm.toggleCollapse(item.node.id) })
+                        OutlineRow(
+                            item = item,
+                            editing = state.editing == item.node.id,
+                            editBuffer = state.editBuffer,
+                            onToggle = { vm.toggleCollapse(item.node.id) },
+                            onBeginEdit = { vm.beginEdit(item.node.id) },
+                            onEditChange = vm::onEditBufferChange,
+                            onCommitEdit = { vm.commitEdit() },
+                            onEnterCreatesSibling = { vm.createSiblingAfter(item.node.id) },
+                            onDelete = { vm.delete(item.node.id) },
+                        )
                     }
                 }
             }
         }
     }
+
+    if (state.conflictPending) {
+        ConflictDialog(
+            onOverwrite = { vm.confirmOverwrite() },
+            onDiscard = { vm.discardLocal() },
+            onDismiss = { vm.dismissConflict() },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun OutlineRow(item: RenderItem, onToggle: () -> Unit) {
+private fun OutlineRow(
+    item: RenderItem,
+    editing: Boolean,
+    editBuffer: String,
+    onToggle: () -> Unit,
+    onBeginEdit: () -> Unit,
+    onEditChange: (String) -> Unit,
+    onCommitEdit: () -> Unit,
+    onEnterCreatesSibling: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(editing) {
+        if (editing) focusRequester.requestFocus()
+    }
+
     Column(
         Modifier
             .fillMaxWidth()
@@ -109,7 +173,56 @@ private fun OutlineRow(item: RenderItem, onToggle: () -> Unit) {
                 onClick = onToggle,
             )
             Spacer(Modifier.size(8.dp))
-            TitleRow(item.node)
+            Box(Modifier.weight(1f)) {
+                if (editing) {
+                    BasicTextField(
+                        value = editBuffer,
+                        onValueChange = { text ->
+                            if (text.contains('\n')) {
+                                onEditChange(text.replace("\n", ""))
+                                onEnterCreatesSibling()
+                            } else {
+                                onEditChange(text)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = { onEnterCreatesSibling() },
+                        ),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    )
+                } else {
+                    var menuOpen by remember { mutableStateOf(false) }
+                    TitleRow(
+                        node = item.node,
+                        onClick = onBeginEdit,
+                        onLongClick = { menuOpen = true },
+                    )
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("New sibling") },
+                            onClick = {
+                                menuOpen = false
+                                onEnterCreatesSibling()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            onClick = {
+                                menuOpen = false
+                                onDelete()
+                            },
+                        )
+                    }
+                }
+            }
         }
         if (item.node.notes.isNotEmpty()) {
             Text(
@@ -120,6 +233,37 @@ private fun OutlineRow(item: RenderItem, onToggle: () -> Unit) {
                 modifier = Modifier.padding(start = 32.dp, top = 2.dp),
             )
         }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TitleRow(
+    node: Node,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        node.todoState?.let { TodoChip(it) }
+        node.priority?.let { PriorityChip(it) }
+        Text(
+            text = node.title.ifEmpty { "(untitled)" },
+            style = MaterialTheme.typography.bodyLarge.copy(
+                textDecoration = if (node.todoState == "DONE") TextDecoration.LineThrough else null,
+                fontStyle = if (node.title.isEmpty()) FontStyle.Italic else null,
+            ),
+            color = if (node.title.isEmpty())
+                MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        for (tag in node.tags) TagChip(tag)
     }
 }
 
@@ -140,30 +284,6 @@ private fun Bullet(hasChildren: Boolean, isCollapsed: Boolean, onClick: () -> Un
                 drawCircle(color = color, radius = size.minDimension / 2)
             }
         }
-    }
-}
-
-@Composable
-private fun TitleRow(node: Node) {
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        node.todoState?.let { TodoChip(it) }
-        node.priority?.let { PriorityChip(it) }
-        Text(
-            text = node.title.ifEmpty { "(untitled)" },
-            style = MaterialTheme.typography.bodyLarge.copy(
-                textDecoration = if (node.todoState == "DONE") TextDecoration.LineThrough else null,
-                fontStyle = if (node.title.isEmpty()) FontStyle.Italic else null,
-            ),
-            color = if (node.title.isEmpty())
-                MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        for (tag in node.tags) TagChip(tag)
     }
 }
 
@@ -199,4 +319,26 @@ private fun TagChip(tag: String) {
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
     }
+}
+
+@Composable
+private fun ConflictDialog(
+    onOverwrite: () -> Unit,
+    onDiscard: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("File changed on disk") },
+        text = { Text("This file was modified outside the app since you opened it. What would you like to do?") },
+        confirmButton = {
+            TextButton(onClick = onOverwrite) { Text("Overwrite") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDiscard) { Text("Discard mine") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
