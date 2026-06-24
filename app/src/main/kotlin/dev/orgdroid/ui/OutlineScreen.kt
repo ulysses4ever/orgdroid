@@ -44,6 +44,8 @@ private data class RenderItem(
     val isCollapsed: Boolean,
     val canIndent: Boolean,
     val canOutdent: Boolean,
+    val canMoveUp: Boolean,
+    val canMoveDown: Boolean,
 )
 
 private fun flatten(
@@ -67,6 +69,8 @@ private fun flatten(
                     isCollapsed = isCollapsed,
                     canIndent = indexInParent > 0,
                     canOutdent = parent.id != startNode.id,
+                    canMoveUp = indexInParent > 0,
+                    canMoveDown = indexInParent < parent.children.size - 1,
                 )
             )
         }
@@ -176,6 +180,8 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                             onBeginEditNotes = { vm.beginEditNotes(item.node.id) },
                             onNotesChange = vm::onNotesBufferChange,
                             onCommitNotes = { vm.commitNotes() },
+                            onMoveUp = { vm.moveUp(item.node.id) },
+                            onMoveDown = { vm.moveDown(item.node.id) },
                         )
                     }
                 }
@@ -213,6 +219,8 @@ private fun OutlineRow(
     onBeginEditNotes: () -> Unit,
     onNotesChange: (String) -> Unit,
     onCommitNotes: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
 ) {
     val titleFocusRequester = remember { FocusRequester() }
     val notesFocusRequester = remember { FocusRequester() }
@@ -278,6 +286,16 @@ private fun OutlineRow(
                             text = { Text("Outdent") },
                             enabled = item.canOutdent,
                             onClick = { menuOpen = false; onOutdent() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Move up") },
+                            enabled = item.canMoveUp,
+                            onClick = { menuOpen = false; onMoveUp() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Move down") },
+                            enabled = item.canMoveDown,
+                            onClick = { menuOpen = false; onMoveDown() },
                         )
                         DropdownMenuItem(
                             text = { Text("New sibling") },

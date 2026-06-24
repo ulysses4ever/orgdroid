@@ -142,6 +142,26 @@ object TreeOps {
         return transform(root, grandparent.id) { it.copy(children = newGrandChildren) }
     }
 
+    fun moveUp(root: Node, id: NodeId): Node {
+        val (parent, idx) = findParentAndIndex(root, id) ?: return root
+        if (idx == 0) return root
+        val newChildren = parent.children.toMutableList().apply {
+            val node = removeAt(idx)
+            add(idx - 1, node)
+        }
+        return transform(root, parent.id) { it.copy(children = newChildren) }
+    }
+
+    fun moveDown(root: Node, id: NodeId): Node {
+        val (parent, idx) = findParentAndIndex(root, id) ?: return root
+        if (idx >= parent.children.size - 1) return root
+        val newChildren = parent.children.toMutableList().apply {
+            val node = removeAt(idx)
+            add(idx + 1, node)
+        }
+        return transform(root, parent.id) { it.copy(children = newChildren) }
+    }
+
     fun updateTodoState(root: Node, id: NodeId, newState: String?): Node =
         transform(root, id) { it.copy(todoState = newState, rawHeadingLine = null) }
 

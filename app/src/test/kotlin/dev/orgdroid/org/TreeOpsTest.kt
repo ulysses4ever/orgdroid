@@ -227,4 +227,59 @@ class TreeOpsTest {
         val updated = TreeOps.findNode(newRoot, one.id)!!
         assertTrue(updated.notes.isEmpty())
     }
+
+    @Test fun moveUpSwapsWithPreviousSibling() {
+        val root = tree()
+        val two = root.children[1]
+        val newRoot = TreeOps.moveUp(root, two.id)
+        assertEquals(3, newRoot.children.size)
+        assertEquals(two.id, newRoot.children[0].id)
+        assertEquals("One", newRoot.children[1].title)
+        assertEquals("Three", newRoot.children[2].title)
+    }
+
+    @Test fun moveUpAtTopIsNoOp() {
+        val root = tree()
+        val one = root.children[0]
+        val newRoot = TreeOps.moveUp(root, one.id)
+        assertTrue(newRoot === root)
+    }
+
+    @Test fun moveDownSwapsWithNextSibling() {
+        val root = tree()
+        val one = root.children[0]
+        val newRoot = TreeOps.moveDown(root, one.id)
+        assertEquals(3, newRoot.children.size)
+        assertEquals("Two", newRoot.children[0].title)
+        assertEquals(one.id, newRoot.children[1].id)
+        assertEquals("Three", newRoot.children[2].title)
+    }
+
+    @Test fun moveDownAtBottomIsNoOp() {
+        val root = tree()
+        val three = root.children[2]
+        val newRoot = TreeOps.moveDown(root, three.id)
+        assertTrue(newRoot === root)
+    }
+
+    @Test fun moveUpPreservesSubtreeAndRawHeading() {
+        val root = tree()
+        val one = root.children[0]
+        val two = root.children[1]
+        val newRoot = TreeOps.moveUp(root, two.id)
+        val movedOne = newRoot.children[1]
+        assertEquals(one.id, movedOne.id)
+        assertEquals(2, movedOne.children.size)
+        assertEquals("OneA", movedOne.children[0].title)
+        assertEquals("OneB", movedOne.children[1].title)
+        assertEquals(one.rawHeadingLine, movedOne.rawHeadingLine)
+    }
+
+    @Test fun moveOnUnknownIdIsNoOp() {
+        val root = tree()
+        val newRoot = TreeOps.moveUp(root, NodeId(99999L))
+        assertTrue(newRoot === root)
+        val newRoot2 = TreeOps.moveDown(root, NodeId(99999L))
+        assertTrue(newRoot2 === root)
+    }
 }

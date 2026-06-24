@@ -226,6 +226,22 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    fun moveUp(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        val newRoot = TreeOps.moveUp(root, id)
+        if (newRoot === root) return
+        _state.value = s.copy(root = newRoot, dirty = true)
+    }
+
+    fun moveDown(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        val newRoot = TreeOps.moveDown(root, id)
+        if (newRoot === root) return
+        _state.value = s.copy(root = newRoot, dirty = true)
+    }
+
     fun indent(id: NodeId) {
         val s = commitEditInternal(_state.value)
         val root = s.root ?: return

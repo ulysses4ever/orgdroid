@@ -89,4 +89,13 @@ class OrgSerializerTest {
         val mutated = TreeOps.updateTodoState(root, root.children[0].id, null)
         assertEquals("* Foo :tag:\n", OrgSerializer.serialize(mutated))
     }
+
+    @Test fun moveUpRoundTripsByteIdenticalForMovedSubtree() {
+        val input = "* One\n** OneA\nbody of OneA\n** OneB\n* Two\nbody of Two\n* Three\n"
+        val root = OrgParser.parse(input)
+        val two = root.children[1]
+        val mutated = TreeOps.moveUp(root, two.id)
+        val expected = "* Two\nbody of Two\n* One\n** OneA\nbody of OneA\n** OneB\n* Three\n"
+        assertEquals(expected, OrgSerializer.serialize(mutated))
+    }
 }
