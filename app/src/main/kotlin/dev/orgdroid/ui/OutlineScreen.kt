@@ -58,6 +58,7 @@ private data class RenderItem(
     val canOutdent: Boolean,
     val canMoveUp: Boolean,
     val canMoveDown: Boolean,
+    val isNotesCollapsed: Boolean,
 )
 
 private fun flatten(
@@ -65,6 +66,7 @@ private fun flatten(
     collapsed: Set<NodeId>,
     focusedRoot: NodeId?,
     visibleIds: Set<NodeId>,
+    notesCollapsed: Set<NodeId>,
 ): List<RenderItem> {
     if (root == null) return emptyList()
     val startNode = if (focusedRoot != null) TreeOps.findNode(root, focusedRoot) else root
@@ -86,6 +88,7 @@ private fun flatten(
                     canOutdent = parent.id != startNode.id,
                     canMoveUp = indexInParent > 0,
                     canMoveDown = indexInParent < parent.children.size - 1,
+                    isNotesCollapsed = node.id in notesCollapsed,
                 )
             )
         }
@@ -128,8 +131,8 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         }
     }
 
-    val items by remember(state.root, state.collapsed, state.focusedRoot, visibleIds) {
-        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot, visibleIds) }
+    val items by remember(state.root, state.collapsed, state.focusedRoot, visibleIds, state.notesCollapsed) {
+        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot, visibleIds, state.notesCollapsed) }
     }
 
     val listState = rememberLazyListState()
@@ -290,6 +293,7 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                                     onMoveUp = { vm.moveUp(item.node.id) },
                                     onMoveDown = { vm.moveDown(item.node.id) },
                                     onEditMetadata = { vm.openMetadata(item.node.id) },
+                                    onToggleNotesCollapsed = { vm.toggleNotesCollapsed(item.node.id) },
                                 )
                             }
                         }
@@ -359,6 +363,7 @@ private fun OutlineRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onEditMetadata: () -> Unit,
+    onToggleNotesCollapsed: () -> Unit,
 ) {
     val titleFocusRequester = remember { FocusRequester() }
     val notesFocusRequester = remember { FocusRequester() }
@@ -375,7 +380,7 @@ private fun OutlineRow(
             .padding(start = (item.depth * 20).dp, top = 4.dp, bottom = 4.dp, end = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Bullet(hasChildren = item.hasChildren)
+            Bullet(hasChildren = item.hasChildren, onClick = onZoomIn)
             Spacer(Modifier.size(8.dp))
             Box(Modifier.weight(1f)) {
                 if (editing) {
@@ -459,8 +464,7 @@ private fun OutlineRow(
                     }
                 }
             }
-            val canCollapse = item.hasChildren || item.node.notes.isNotEmpty()
-            if (canCollapse) {
+            if (item.hasChildren) {
                 CollapseToggle(isCollapsed = item.isCollapsed, onClick = onToggle)
             }
         }
@@ -479,15 +483,27 @@ private fun OutlineRow(
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             )
-        } else if (item.node.notes.isNotEmpty() && !item.isCollapsed) {
-            Text(
-                text = item.node.notes.joinToString("\n"),
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(start = 32.dp, top = 2.dp)
-                    .clickable { onBeginEditNotes() },
-            )
+        } else if (item.node.notes.isNotEmpty()) {
+            Row(
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier.padding(start = 32.dp, top = 2.dp),
+            ) {
+                CollapseToggle(
+                    isCollapsed = item.isNotesCollapsed,
+                    onClick = onToggleNotesCollapsed,
+                    size = 16.dp,
+                    iconSize = 7.dp,
+                )
+                if (!item.isNotesCollapsed) {
+                    Spacer(Modifier.size(4.dp))
+                    Text(
+                        text = item.node.notes.joinToString("\n"),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { onBeginEditNotes() },
+                    )
+                }
+            }
         }
     }
 }
@@ -525,9 +541,14 @@ private fun TitleRow(
 }
 
 @Composable
-private fun Bullet(hasChildren: Boolean) {
+private fun Bullet(hasChildren: Boolean, onClick: () -> Unit) {
     val color = MaterialTheme.colorScheme.onSurface
-    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+    Box(
+        Modifier
+            .size(24.dp)
+            .clickable(enabled = hasChildren, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
         Canvas(Modifier.size(if (hasChildren) 10.dp else 7.dp)) {
             if (hasChildren) {
                 drawCircle(color = color, radius = size.minDimension / 2, style = Stroke(width = 2.dp.toPx()))
@@ -539,26 +560,31 @@ private fun Bullet(hasChildren: Boolean) {
 }
 
 @Composable
-private fun CollapseToggle(isCollapsed: Boolean, onClick: () -> Unit) {
+private fun CollapseToggle(
+    isCollapsed: Boolean,
+    onClick: () -> Unit,
+    size: androidx.compose.ui.unit.Dp = 24.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 9.dp,
+) {
     val color = MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         Modifier
-            .size(24.dp)
+            .size(size)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(9.dp)) {
+        Canvas(Modifier.size(iconSize)) {
             val path = Path()
             if (isCollapsed) {
                 // ▶ right-pointing (collapsed — tap to expand)
                 path.moveTo(0f, 0f)
-                path.lineTo(size.width, size.height / 2f)
-                path.lineTo(0f, size.height)
+                path.lineTo(this.size.width, this.size.height / 2f)
+                path.lineTo(0f, this.size.height)
             } else {
                 // ▼ down-pointing (expanded — tap to collapse)
                 path.moveTo(0f, 0f)
-                path.lineTo(size.width, 0f)
-                path.lineTo(size.width / 2f, size.height)
+                path.lineTo(this.size.width, 0f)
+                path.lineTo(this.size.width / 2f, this.size.height)
             }
             path.close()
             drawPath(path = path, color = color)

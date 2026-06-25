@@ -41,6 +41,7 @@ data class OutlineState(
     val metadataSheetFor: NodeId? = null,
     val undoStack: List<UndoSnapshot> = emptyList(),
     val redoStack: List<UndoSnapshot> = emptyList(),
+    val notesCollapsed: Set<NodeId> = emptySet(),
 )
 
 class OutlineViewModel(app: Application) : AndroidViewModel(app) {
@@ -240,6 +241,12 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = s.copy(collapsed = newCollapsed)
     }
 
+    fun toggleNotesCollapsed(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val newSet = if (id in s.notesCollapsed) s.notesCollapsed - id else s.notesCollapsed + id
+        _state.value = s.copy(notesCollapsed = newSet)
+    }
+
     fun beginEdit(id: NodeId) {
         val s = _state.value
         val root = s.root ?: return
@@ -394,6 +401,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
             editingNotes = if (s.editingNotes == id) null else s.editingNotes,
             notesBuffer = if (s.editingNotes == id) "" else s.notesBuffer,
             collapsed = s.collapsed - id,
+            notesCollapsed = s.notesCollapsed - id,
             focusedRoot = validFocused,
             metadataSheetFor = if (s.metadataSheetFor == id) null else s.metadataSheetFor,
         )
@@ -491,6 +499,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
                     editingNotes = null,
                     notesBuffer = "",
                     collapsed = emptySet(),
+                    notesCollapsed = emptySet(),
                     conflictPending = false,
                     undoStack = emptyList(),
                     redoStack = emptyList(),
