@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -40,6 +41,7 @@ import dev.orgdroid.org.Node
 import dev.orgdroid.org.NodeId
 import dev.orgdroid.org.Search
 import dev.orgdroid.org.TreeOps
+import dev.orgdroid.org.isValidTag
 import dev.orgdroid.outline.OutlineViewModel
 import dev.orgdroid.recents.RecentFile
 
@@ -235,6 +237,7 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                                     onCommitNotes = { vm.commitNotes() },
                                     onMoveUp = { vm.moveUp(item.node.id) },
                                     onMoveDown = { vm.moveDown(item.node.id) },
+                                    onEditMetadata = { vm.openMetadata(item.node.id) },
                                 )
                             }
                         }
@@ -256,6 +259,18 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         CloseConfirmDialog(
             onDiscard = { vm.confirmCloseDiscard() },
             onCancel = { vm.cancelClose() },
+        )
+    }
+
+    val metaId = state.metadataSheetFor
+    val metaNode = metaId?.let { state.root?.let { r -> TreeOps.findNode(r, it) } }
+    if (metaId != null && metaNode != null) {
+        MetadataSheet(
+            node = metaNode,
+            onSetPriority = { p -> vm.setPriority(metaId, p) },
+            onAddTag = { t -> vm.addTag(metaId, t) },
+            onRemoveTag = { t -> vm.removeTag(metaId, t) },
+            onDismiss = { vm.closeMetadata() },
         )
     }
 }
@@ -283,6 +298,7 @@ private fun OutlineRow(
     onCommitNotes: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onEditMetadata: () -> Unit,
 ) {
     val titleFocusRequester = remember { FocusRequester() }
     val notesFocusRequester = remember { FocusRequester() }
@@ -370,6 +386,10 @@ private fun OutlineRow(
                         DropdownMenuItem(
                             text = { Text(if (item.node.notes.isEmpty()) "Add notes" else "Edit notes") },
                             onClick = { menuOpen = false; onBeginEditNotes() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Edit metadata") },
+                            onClick = { menuOpen = false; onEditMetadata() },
                         )
                         DropdownMenuItem(
                             text = { Text("Zoom in") },
@@ -614,6 +634,158 @@ private fun SearchBarRow(
                 Icon(Icons.Filled.Close, contentDescription = "Clear search")
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun MetadataSheet(
+    node: Node,
+    onSetPriority: (Char?) -> Unit,
+    onAddTag: (String) -> Unit,
+    onRemoveTag: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var tagInput by rememberSaveable { mutableStateOf("") }
+    var tagError by rememberSaveable { mutableStateOf<String?>(null) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                "Priority",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PriorityRadio("None", node.priority == null) { onSetPriority(null) }
+                PriorityRadio("A", node.priority == 'A') { onSetPriority('A') }
+                PriorityRadio("B", node.priority == 'B') { onSetPriority('B') }
+                PriorityRadio("C", node.priority == 'C') { onSetPriority('C') }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                "Tags",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            if (node.tags.isEmpty()) {
+                Text(
+                    "No tags yet",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            } else {
+                FlowRow(
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (t in node.tags) {
+                        RemovableTagChip(t) { onRemoveTag(t) }
+                    }
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(
+                    value = tagInput,
+                    onValueChange = { text ->
+                        tagInput = text
+                        tagError = null
+                    },
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        commitTag(tagInput, node.tags, onAddTag) { err ->
+                            tagError = err
+                            if (err == null) tagInput = ""
+                        }
+                    }),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                )
+                TextButton(onClick = {
+                    commitTag(tagInput, node.tags, onAddTag) { err ->
+                        tagError = err
+                        if (err == null) tagInput = ""
+                    }
+                }) { Text("Add") }
+            }
+            if (tagError != null) {
+                Text(
+                    tagError!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun PriorityRadio(label: String, selected: Boolean, onClick: () -> Unit) {
+    // Row owns the click; RadioButton is decorative. Setting onClick = null on the
+    // RadioButton prevents the tap from being handled twice (once by the radio,
+    // once by the surrounding Row). This is the M3 recommended pattern.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(end = 8.dp).clickable(onClick = onClick),
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun RemovableTagChip(tag: String, onRemove: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+        ) {
+            Text(
+                tag,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Remove tag",
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun commitTag(
+    raw: String,
+    existing: List<String>,
+    onAdd: (String) -> Unit,
+    after: (String?) -> Unit,
+) {
+    val tag = raw.trim()
+    when {
+        tag.isEmpty() -> after(null) // silently ignore empty input
+        !isValidTag(tag) -> after("Invalid tag: use letters, digits, _ @ %")
+        tag in existing -> after(null) // duplicate — caller clears input, no error shown
+        else -> { onAdd(tag); after(null) }
     }
 }
 

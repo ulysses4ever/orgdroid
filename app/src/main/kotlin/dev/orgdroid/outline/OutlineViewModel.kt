@@ -38,6 +38,7 @@ data class OutlineState(
     val closePending: Boolean = false,
     val searchActive: Boolean = false,
     val searchQuery: String = "",
+    val metadataSheetFor: NodeId? = null,
 )
 
 class OutlineViewModel(app: Application) : AndroidViewModel(app) {
@@ -106,7 +107,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeFile() {
-        val s = commitEditInternal(_state.value)
+        val s = commitEditInternal(_state.value).copy(metadataSheetFor = null)
         _state.value = s
         if (s.dirty) {
             _state.value = s.copy(closePending = true)
@@ -135,6 +136,47 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
     fun setSearchQuery(text: String) {
         if (!_state.value.searchActive) return
         _state.value = _state.value.copy(searchQuery = text)
+    }
+
+    fun openMetadata(id: NodeId) {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        if (TreeOps.findNode(root, id) == null) return
+        _state.value = s.copy(metadataSheetFor = id)
+    }
+
+    fun closeMetadata() {
+        _state.value = _state.value.copy(metadataSheetFor = null)
+    }
+
+    fun setPriority(id: NodeId, priority: Char?) {
+        val s = _state.value
+        val root = s.root ?: return
+        val node = TreeOps.findNode(root, id) ?: return
+        if (node.priority == priority) return
+        _state.value = s.copy(root = TreeOps.updatePriority(root, id, priority), dirty = true)
+    }
+
+    fun addTag(id: NodeId, tag: String) {
+        val s = _state.value
+        val root = s.root ?: return
+        val node = TreeOps.findNode(root, id) ?: return
+        if (tag in node.tags) return
+        _state.value = s.copy(
+            root = TreeOps.updateTags(root, id, node.tags + tag),
+            dirty = true,
+        )
+    }
+
+    fun removeTag(id: NodeId, tag: String) {
+        val s = _state.value
+        val root = s.root ?: return
+        val node = TreeOps.findNode(root, id) ?: return
+        if (tag !in node.tags) return
+        _state.value = s.copy(
+            root = TreeOps.updateTags(root, id, node.tags - tag),
+            dirty = true,
+        )
     }
 
     private fun performClose(s: OutlineState) {
@@ -302,6 +344,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
             notesBuffer = if (s.editingNotes == id) "" else s.notesBuffer,
             collapsed = s.collapsed - id,
             focusedRoot = validFocused,
+            metadataSheetFor = if (s.metadataSheetFor == id) null else s.metadataSheetFor,
         )
     }
 

@@ -282,4 +282,41 @@ class TreeOpsTest {
         val newRoot2 = TreeOps.moveDown(root, NodeId(99999L))
         assertTrue(newRoot2 === root)
     }
+
+    @Test fun updatePriorityChangesField() {
+        val root = OrgParser.parse("* [#B] Heading\n")
+        val target = root.children.single().id
+        val updated = TreeOps.updatePriority(root, target, 'A')
+        assertEquals('A', TreeOps.findNode(updated, target)!!.priority)
+    }
+
+    @Test fun updatePriorityToNullRemovesIt() {
+        val root = OrgParser.parse("* [#A] Heading\n")
+        val target = root.children.single().id
+        val updated = TreeOps.updatePriority(root, target, null)
+        assertNull(TreeOps.findNode(updated, target)!!.priority)
+    }
+
+    @Test fun updateTagsReplacesList() {
+        val root = OrgParser.parse("* Heading :old:\n")
+        val target = root.children.single().id
+        val updated = TreeOps.updateTags(root, target, listOf("new", "fresh"))
+        assertEquals(listOf("new", "fresh"), TreeOps.findNode(updated, target)!!.tags)
+    }
+
+    @Test fun updateTagsToEmptyClearsHeadingTagBlock() {
+        val root = OrgParser.parse("* Heading :foo:\n")
+        val target = root.children.single().id
+        val cleared = TreeOps.updateTags(root, target, emptyList())
+        val text = OrgSerializer.serialize(cleared)
+        assertEquals("* Heading\n", text)
+    }
+
+    @Test fun updatePriorityRoundTripsThroughSerializer() {
+        val root = OrgParser.parse("* Heading\n")
+        val target = root.children.single().id
+        val updated = TreeOps.updatePriority(root, target, 'B')
+        val text = OrgSerializer.serialize(updated)
+        assertEquals("* [#B] Heading\n", text)
+    }
 }

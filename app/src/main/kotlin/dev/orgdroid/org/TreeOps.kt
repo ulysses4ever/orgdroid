@@ -178,4 +178,10 @@ object TreeOps {
 
     fun updateNotes(root: Node, id: NodeId, newNotes: List<String>): Node =
         transform(root, id) { it.copy(notes = newNotes) }
+
+    fun updatePriority(root: Node, id: NodeId, priority: Char?): Node =
+        transform(root, id) { it.copy(priority = priority, rawHeadingLine = null) }
+
+    fun updateTags(root: Node, id: NodeId, tags: List<String>): Node =
+        transform(root, id) { it.copy(tags = tags, rawHeadingLine = null) }
 }
