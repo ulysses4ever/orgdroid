@@ -36,6 +36,8 @@ data class OutlineState(
     val focusedRoot: NodeId? = null,
     val recents: List<RecentFile> = emptyList(),
     val closePending: Boolean = false,
+    val searchActive: Boolean = false,
+    val searchQuery: String = "",
 )
 
 class OutlineViewModel(app: Application) : AndroidViewModel(app) {
@@ -119,6 +121,20 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelClose() {
         _state.value = _state.value.copy(closePending = false)
+    }
+
+    fun openSearch() {
+        val s = commitEditInternal(_state.value)
+        _state.value = s.copy(searchActive = true)
+    }
+
+    fun closeSearch() {
+        _state.value = _state.value.copy(searchActive = false, searchQuery = "")
+    }
+
+    fun setSearchQuery(text: String) {
+        if (!_state.value.searchActive) return
+        _state.value = _state.value.copy(searchQuery = text)
     }
 
     private fun performClose(s: OutlineState) {

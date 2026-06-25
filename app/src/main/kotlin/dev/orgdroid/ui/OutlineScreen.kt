@@ -15,10 +15,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.orgdroid.org.Node
 import dev.orgdroid.org.NodeId
+import dev.orgdroid.org.Search
 import dev.orgdroid.org.TreeOps
 import dev.orgdroid.outline.OutlineViewModel
 import dev.orgdroid.recents.RecentFile
@@ -55,13 +58,16 @@ private fun flatten(
     root: Node?,
     collapsed: Set<NodeId>,
     focusedRoot: NodeId?,
+    visibleIds: Set<NodeId>,
 ): List<RenderItem> {
     if (root == null) return emptyList()
     val startNode = if (focusedRoot != null) TreeOps.findNode(root, focusedRoot) else root
     if (startNode == null) return emptyList()
+    val filtering = visibleIds.isNotEmpty()
 
     val out = mutableListOf<RenderItem>()
     fun visit(parent: Node, node: Node, indexInParent: Int, depth: Int) {
+        if (filtering && node.id !in visibleIds) return
         val isCollapsed = node.id in collapsed
         if (node.id != startNode.id) {
             out.add(
@@ -69,7 +75,7 @@ private fun flatten(
                     node = node,
                     depth = depth,
                     hasChildren = node.children.isNotEmpty(),
-                    isCollapsed = isCollapsed,
+                    isCollapsed = if (filtering) false else isCollapsed,
                     canIndent = indexInParent > 0,
                     canOutdent = parent.id != startNode.id,
                     canMoveUp = indexInParent > 0,
@@ -77,7 +83,8 @@ private fun flatten(
                 )
             )
         }
-        if (!isCollapsed) {
+        val expandChildren = if (filtering) true else !isCollapsed
+        if (expandChildren) {
             val childDepth = if (node.id == startNode.id) 0 else depth + 1
             for ((i, c) in node.children.withIndex()) visit(node, c, i, childDepth)
         }
@@ -95,8 +102,17 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) vm.open(uri) }
 
-    val items by remember(state.root, state.collapsed, state.focusedRoot) {
-        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot) }
+    val visibleIds by remember(state.root, state.searchQuery) {
+        derivedStateOf {
+            val q = state.searchQuery
+            val r = state.root
+            if (q.isEmpty() || r == null) emptySet<NodeId>()
+            else Search.visibleIds(r, q)
+        }
+    }
+
+    val items by remember(state.root, state.collapsed, state.focusedRoot, visibleIds) {
+        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot, visibleIds) }
     }
 
     val listState = rememberLazyListState()
@@ -114,41 +130,55 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    val name = state.fileName ?: "orgdroid"
-                    val focusedTitle = state.focusedRoot?.let { id ->
-                        state.root?.let { TreeOps.findNode(it, id)?.title }
-                    }
-                    val display = when {
-                        focusedTitle == null -> name
-                        focusedTitle.isEmpty() -> "(untitled)"
-                        else -> focusedTitle
-                    }
-                    Text(if (state.dirty && state.focusedRoot == null) "$display •" else display)
-                },
-                navigationIcon = {
-                    if (state.focusedRoot != null) {
-                        IconButton(onClick = { vm.zoomOut() }) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Zoom out")
+            Column {
+                TopAppBar(
+                    title = {
+                        val name = state.fileName ?: "orgdroid"
+                        val focusedTitle = state.focusedRoot?.let { id ->
+                            state.root?.let { TreeOps.findNode(it, id)?.title }
                         }
-                    }
-                },
-                actions = {
-                    if (state.root != null || state.uri != null) {
-                        IconButton(onClick = { vm.closeFile() }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Close file")
+                        val display = when {
+                            focusedTitle == null -> name
+                            focusedTitle.isEmpty() -> "(untitled)"
+                            else -> focusedTitle
                         }
+                        Text(if (state.dirty && state.focusedRoot == null) "$display •" else display)
+                    },
+                    navigationIcon = {
+                        if (state.focusedRoot != null) {
+                            IconButton(onClick = { vm.zoomOut() }) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = "Zoom out")
+                            }
+                        }
+                    },
+                    actions = {
+                        if (state.root != null && !state.searchActive) {
+                            IconButton(onClick = { vm.openSearch() }) {
+                                Icon(Icons.Filled.Search, contentDescription = "Search")
+                            }
+                        }
+                        if (state.root != null || state.uri != null) {
+                            IconButton(onClick = { vm.closeFile() }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Close file")
+                            }
+                        }
+                        TextButton(onClick = {
+                            openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
+                        }) { Text("Open") }
+                        TextButton(
+                            onClick = { vm.save() },
+                            enabled = state.dirty && !state.saving,
+                        ) { Text(if (state.saving) "Saving…" else "Save") }
                     }
-                    TextButton(onClick = {
-                        openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
-                    }) { Text("Open") }
-                    TextButton(
-                        onClick = { vm.save() },
-                        enabled = state.dirty && !state.saving,
-                    ) { Text(if (state.saving) "Saving…" else "Save") }
+                )
+                if (state.searchActive) {
+                    SearchBarRow(
+                        query = state.searchQuery,
+                        onChange = { vm.setSearchQuery(it) },
+                        onClose = { vm.closeSearch() },
+                    )
                 }
-            )
+            }
         },
         floatingActionButton = {
             if (state.root != null) {
@@ -172,30 +202,42 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                     Modifier.padding(16.dp),
                     color = MaterialTheme.colorScheme.error,
                 )
-                else -> LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
-                    items(items, key = { it.node.id.value }) { item ->
-                        OutlineRow(
-                            item = item,
-                            editing = state.editing == item.node.id,
-                            editBuffer = state.editBuffer,
-                            editingNotes = state.editingNotes == item.node.id,
-                            notesBuffer = state.notesBuffer,
-                            onToggle = { vm.toggleCollapse(item.node.id) },
-                            onBeginEdit = { vm.beginEdit(item.node.id) },
-                            onEditChange = vm::onEditBufferChange,
-                            onCommitEdit = { vm.commitEdit() },
-                            onEnterCreatesSibling = { vm.createSiblingAfter(item.node.id) },
-                            onDelete = { vm.delete(item.node.id) },
-                            onIndent = { vm.indent(item.node.id) },
-                            onOutdent = { vm.outdent(item.node.id) },
-                            onZoomIn = { vm.zoomIn(item.node.id) },
-                            onCycleTodo = { vm.cycleTodo(item.node.id) },
-                            onBeginEditNotes = { vm.beginEditNotes(item.node.id) },
-                            onNotesChange = vm::onNotesBufferChange,
-                            onCommitNotes = { vm.commitNotes() },
-                            onMoveUp = { vm.moveUp(item.node.id) },
-                            onMoveDown = { vm.moveDown(item.node.id) },
-                        )
+                else -> {
+                    if (state.searchQuery.isNotEmpty() && items.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                "No matches for \"${state.searchQuery}\"",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
+                            items(items, key = { it.node.id.value }) { item ->
+                                OutlineRow(
+                                    item = item,
+                                    editing = state.editing == item.node.id,
+                                    editBuffer = state.editBuffer,
+                                    editingNotes = state.editingNotes == item.node.id,
+                                    notesBuffer = state.notesBuffer,
+                                    onToggle = { vm.toggleCollapse(item.node.id) },
+                                    onBeginEdit = { vm.beginEdit(item.node.id) },
+                                    onEditChange = vm::onEditBufferChange,
+                                    onCommitEdit = { vm.commitEdit() },
+                                    onEnterCreatesSibling = { vm.createSiblingAfter(item.node.id) },
+                                    onDelete = { vm.delete(item.node.id) },
+                                    onIndent = { vm.indent(item.node.id) },
+                                    onOutdent = { vm.outdent(item.node.id) },
+                                    onZoomIn = { vm.zoomIn(item.node.id) },
+                                    onCycleTodo = { vm.cycleTodo(item.node.id) },
+                                    onBeginEditNotes = { vm.beginEditNotes(item.node.id) },
+                                    onNotesChange = vm::onNotesBufferChange,
+                                    onCommitNotes = { vm.commitNotes() },
+                                    onMoveUp = { vm.moveUp(item.node.id) },
+                                    onMoveDown = { vm.moveDown(item.node.id) },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -526,6 +568,51 @@ private fun RecentRow(
                 text = { Text("Remove from recents") },
                 onClick = { menuOpen = false; onRemove() },
             )
+        }
+    }
+}
+
+@Composable
+private fun SearchBarRow(
+    query: String,
+    onChange: (String) -> Unit,
+    onClose: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onClose) {
+            Icon(Icons.Filled.ArrowBack, contentDescription = "Close search")
+        }
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    "Search…",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onChange,
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            )
+        }
+        if (query.isNotEmpty()) {
+            IconButton(onClick = { onChange("") }) {
+                Icon(Icons.Filled.Close, contentDescription = "Clear search")
+            }
         }
     }
 }
