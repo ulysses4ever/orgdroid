@@ -12,7 +12,7 @@ Things I've noticed during M3–M9 that are not bugs but aren't worth fixing inl
 - **Search by tag.** M8 only matches title + notes; M9 added tag editing but didn't extend the search haystack. A heading whose only "urgent" hit is `:urgent:` still won't match. Add a `tag:` prefix or always-include-tags.
 - **Custom `#+TODO:` keyword workflows.** Hardcoded `null → TODO → DONE → null` cycle. See Parser correctness.
 - **Live notes formatting** (links, bold, lists). Monospace plain text only.
-- **Undo / redo.** No safety net for destructive ops.
+- ~~Undo / redo.~~ Shipped in M10 — `UndoSnapshot` + `UndoOps.push`; 50-entry bounded stacks; cleared on Save, Discard-local, and Open.
 
 ## ConflictDialog
 
@@ -62,7 +62,7 @@ Things I've noticed during M3–M9 that are not bugs but aren't worth fixing inl
 
 ## ViewModel state
 
-- **`OutlineState` has 21 fields** after M9 added `metadataSheetFor`. Edges blur (e.g. `loading` vs `saving` vs `conflictPending` vs `closePending`). Consider splitting into `FileState` (uri, fileName, root, originalText, dirty) + `UiState` (editing, editBuffer, editingNotes, notesBuffer, collapsed, focusedRoot, searchActive, searchQuery, metadataSheetFor) + `IoState` (loading, saving, error, conflictPending, closePending) + `LibraryState` (recents). The refactor is overdue but blocks none of the next milestones.
+- **`OutlineState` has 23 fields** after M10 added `undoStack` and `redoStack`. Edges blur (e.g. `loading` vs `saving` vs `conflictPending` vs `closePending`). Consider splitting into `FileState` (uri, fileName, root, originalText, dirty) + `UiState` (editing, editBuffer, editingNotes, notesBuffer, collapsed, focusedRoot, searchActive, searchQuery, metadataSheetFor) + `IoState` (loading, saving, error, conflictPending, closePending) + `LibraryState` (recents). The refactor is overdue but blocks none of the next milestones.
 - **`discardLocal` only resets a subset of UI state** (editing/notesBuffer/collapsed) but leaves `focusedRoot`, `searchActive`, `searchQuery`, and `metadataSheetFor` dangling at NodeIds from the discarded tree. The sheet auto-hides (findNode returns null) and search re-derives against the new tree; focus-resolution silently degrades. Add a "wipe transient UI state" helper used by both `open()` and `discardLocal()`.
 - **`commitEditInternal` name is now misleading.** It commits BOTH title and notes since M5. Rename to `commitPending` (or `flushBuffers`) when next touched. Spec kept the old name to minimize diff churn.
 - **`dirty` is set unconditionally** by `delete`, `indent`, `outdent`, `createSiblingAfter`, `appendInScope`, `cycleTodo`, `moveUp`, `moveDown` — even when the operation could be detected as a no-op (e.g. deleting a freshly created empty row). Minor; the conflict dialog and save flow handle it correctly. (M9's `setPriority`/`addTag`/`removeTag` deliberately *do* guard on no-op to avoid spurious dirty flips when re-selecting the same radio.)
