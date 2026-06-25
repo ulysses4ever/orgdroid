@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
@@ -54,6 +55,7 @@ private data class RenderItem(
     val canOutdent: Boolean,
     val canMoveUp: Boolean,
     val canMoveDown: Boolean,
+    val isNotesExpanded: Boolean,
 )
 
 private fun flatten(
@@ -61,6 +63,7 @@ private fun flatten(
     collapsed: Set<NodeId>,
     focusedRoot: NodeId?,
     visibleIds: Set<NodeId>,
+    notesExpanded: Set<NodeId>,
 ): List<RenderItem> {
     if (root == null) return emptyList()
     val startNode = if (focusedRoot != null) TreeOps.findNode(root, focusedRoot) else root
@@ -82,6 +85,7 @@ private fun flatten(
                     canOutdent = parent.id != startNode.id,
                     canMoveUp = indexInParent > 0,
                     canMoveDown = indexInParent < parent.children.size - 1,
+                    isNotesExpanded = node.id in notesExpanded,
                 )
             )
         }
@@ -113,8 +117,8 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         }
     }
 
-    val items by remember(state.root, state.collapsed, state.focusedRoot, visibleIds) {
-        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot, visibleIds) }
+    val items by remember(state.root, state.collapsed, state.focusedRoot, visibleIds, state.notesExpanded) {
+        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot, visibleIds, state.notesExpanded) }
     }
 
     val listState = rememberLazyListState()
@@ -248,6 +252,7 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                                     onMoveUp = { vm.moveUp(item.node.id) },
                                     onMoveDown = { vm.moveDown(item.node.id) },
                                     onEditMetadata = { vm.openMetadata(item.node.id) },
+                                    onToggleNotesExpanded = { vm.toggleNotesExpanded(item.node.id) },
                                 )
                             }
                         }
@@ -309,6 +314,7 @@ private fun OutlineRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onEditMetadata: () -> Unit,
+    onToggleNotesExpanded: () -> Unit,
 ) {
     val titleFocusRequester = remember { FocusRequester() }
     val notesFocusRequester = remember { FocusRequester() }
@@ -431,15 +437,31 @@ private fun OutlineRow(
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             )
         } else if (item.node.notes.isNotEmpty()) {
-            Text(
-                text = item.node.notes.joinToString("\n"),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .padding(start = 32.dp, top = 2.dp)
-                    .clickable { onBeginEditNotes() },
-            )
+            val multiLine = item.node.notes.size > 1
+            Row(
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier.padding(start = 32.dp, top = 2.dp),
+            ) {
+                if (multiLine) {
+                    NotesToggle(
+                        expanded = item.isNotesExpanded,
+                        onClick = onToggleNotesExpanded,
+                    )
+                    Spacer(Modifier.size(4.dp))
+                }
+                val displayText = if (multiLine && !item.isNotesExpanded) {
+                    item.node.notes.first() + " …"
+                } else {
+                    item.node.notes.joinToString("\n")
+                }
+                Text(
+                    text = displayText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.clickable { onBeginEditNotes() },
+                )
+            }
         }
     }
 }
@@ -492,6 +514,32 @@ private fun Bullet(hasChildren: Boolean, isCollapsed: Boolean, onClick: () -> Un
             } else {
                 drawCircle(color = color, radius = size.minDimension / 2)
             }
+        }
+    }
+}
+
+@Composable
+private fun NotesToggle(expanded: Boolean, onClick: () -> Unit) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        Modifier
+            .size(16.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(8.dp)) {
+            val path = Path()
+            if (expanded) {
+                path.moveTo(0f, 0f)
+                path.lineTo(size.width, 0f)
+                path.lineTo(size.width / 2f, size.height)
+            } else {
+                path.moveTo(0f, 0f)
+                path.lineTo(size.width, size.height / 2f)
+                path.lineTo(0f, size.height)
+            }
+            path.close()
+            drawPath(path = path, color = color)
         }
     }
 }
