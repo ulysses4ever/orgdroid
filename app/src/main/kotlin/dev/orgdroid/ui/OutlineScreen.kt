@@ -152,11 +152,14 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         topBar = {
             Column {
                 CenterAlignedTopAppBar(
-                    // Left: zoom-out when focused, otherwise empty (reserved for future button).
+                    // Left: zoom-out when focused; otherwise global visibility cycle.
                     navigationIcon = {
-                        if (state.focusedRoot != null) {
-                            IconButton(onClick = { vm.zoomOut() }) {
+                        when {
+                            state.focusedRoot != null -> IconButton(onClick = { vm.zoomOut() }) {
                                 Icon(Icons.Filled.ArrowBack, contentDescription = "Zoom out")
+                            }
+                            state.root != null -> IconButton(onClick = { vm.cycleGlobalVisibility() }) {
+                                OutlineCycleIcon(tint = LocalContentColor.current)
                             }
                         }
                     },
@@ -623,6 +626,26 @@ private fun UndoRedoIcon(isRedo: Boolean, tint: androidx.compose.ui.graphics.Col
         path.lineTo(tipX, cy + arrowSize)
         path.lineTo(tipX + arrowSize, cy - arrowSize)
         drawPath(path, tint, style = Stroke(width = sw))
+    }
+}
+
+@Composable
+private fun OutlineCycleIcon(tint: androidx.compose.ui.graphics.Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val sw = 2.dp.toPx()
+        val leftPad = 4.dp.toPx()
+        val rightPad = 4.dp.toPx()
+        val indent = 4.dp.toPx()
+        val rightX = size.width - rightPad
+        val ys = listOf(6.dp.toPx(), 12.dp.toPx(), 18.dp.toPx())
+        for ((i, y) in ys.withIndex()) {
+            drawLine(
+                color = tint,
+                start = androidx.compose.ui.geometry.Offset(leftPad + i * indent, y),
+                end = androidx.compose.ui.geometry.Offset(rightX, y),
+                strokeWidth = sw,
+            )
+        }
     }
 }
 

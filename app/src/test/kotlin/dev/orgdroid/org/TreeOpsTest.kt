@@ -319,4 +319,28 @@ class TreeOpsTest {
         val text = OrgSerializer.serialize(updated)
         assertEquals("* [#B] Heading\n", text)
     }
+
+    @Test fun allCollapsibleIdsCollectsParentsOnly() {
+        val root = tree()
+        val ids = TreeOps.allCollapsibleIds(root)
+        // "One" has children OneA, OneB; "Two" and "Three" are leaves.
+        // Root itself is excluded by design.
+        val expected = setOf(root.children[0].id)
+        assertEquals(expected, ids)
+    }
+
+    @Test fun allNotedIdsCollectsNodesWithNotes() {
+        val root = OrgParser.parse(
+            """
+                * A
+                a note
+                ** A1
+                * B
+            """.trimIndent() + "\n"
+        )
+        val ids = TreeOps.allNotedIds(root)
+        // Only "A" has a notes body.
+        val expected = setOf(root.children[0].id)
+        assertEquals(expected, ids)
+    }
 }

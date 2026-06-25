@@ -247,6 +247,21 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = s.copy(notesCollapsed = newSet)
     }
 
+    fun cycleGlobalVisibility() {
+        val s = commitEditInternal(_state.value)
+        val root = s.root ?: return
+        val parents = TreeOps.allCollapsibleIds(root)
+        val noted = TreeOps.allNotedIds(root)
+        val (newCollapsed, newNotes) = when {
+            s.collapsed == parents && s.notesCollapsed == noted ->
+                emptySet<NodeId>() to noted
+            s.collapsed.isEmpty() && s.notesCollapsed == noted ->
+                emptySet<NodeId>() to emptySet()
+            else -> parents to noted
+        }
+        _state.value = s.copy(collapsed = newCollapsed, notesCollapsed = newNotes)
+    }
+
     fun beginEdit(id: NodeId) {
         val s = _state.value
         val root = s.root ?: return

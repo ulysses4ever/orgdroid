@@ -184,4 +184,24 @@ object TreeOps {
 
     fun updateTags(root: Node, id: NodeId, tags: List<String>): Node =
         transform(root, id) { it.copy(tags = tags, rawHeadingLine = null) }
+
+    fun allCollapsibleIds(root: Node): Set<NodeId> {
+        val out = mutableSetOf<NodeId>()
+        fun visit(node: Node, isRoot: Boolean) {
+            if (!isRoot && node.children.isNotEmpty()) out.add(node.id)
+            for (c in node.children) visit(c, false)
+        }
+        visit(root, true)
+        return out
+    }
+
+    fun allNotedIds(root: Node): Set<NodeId> {
+        val out = mutableSetOf<NodeId>()
+        fun visit(node: Node, isRoot: Boolean) {
+            if (!isRoot && node.notes.isNotEmpty()) out.add(node.id)
+            for (c in node.children) visit(c, false)
+        }
+        visit(root, true)
+        return out
+    }
 }
