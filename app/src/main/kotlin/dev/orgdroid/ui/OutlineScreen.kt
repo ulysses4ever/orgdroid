@@ -1,5 +1,7 @@
 package dev.orgdroid.ui
 
+import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +38,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -103,10 +107,21 @@ private fun flatten(
 @Composable
 fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
     val state by vm.state.collectAsState()
+    val activity = LocalContext.current as? Activity
+    var quitDialogVisible by remember { mutableStateOf(false) }
 
     val openLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri -> if (uri != null) vm.open(uri) }
+
+    // Hierarchical back handling: search → zoom → quit confirmation.
+    BackHandler {
+        when {
+            state.searchActive -> vm.closeSearch()
+            state.focusedRoot != null -> vm.zoomOut()
+            else -> quitDialogVisible = true
+        }
+    }
 
     val visibleIds by remember(state.root, state.searchQuery) {
         derivedStateOf {
@@ -137,19 +152,8 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(
-                    title = {
-                        val name = state.fileName ?: "orgdroid"
-                        val focusedTitle = state.focusedRoot?.let { id ->
-                            state.root?.let { TreeOps.findNode(it, id)?.title }
-                        }
-                        val display = when {
-                            focusedTitle == null -> name
-                            focusedTitle.isEmpty() -> "(untitled)"
-                            else -> focusedTitle
-                        }
-                        Text(if (state.dirty && state.focusedRoot == null) "$display •" else display)
-                    },
+                CenterAlignedTopAppBar(
+                    // Left: zoom-out when focused, otherwise empty (reserved for future button).
                     navigationIcon = {
                         if (state.focusedRoot != null) {
                             IconButton(onClick = { vm.zoomOut() }) {
@@ -157,35 +161,73 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                             }
                         }
                     },
+                    // Center: hamburger menu with all file actions.
+                    title = {
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                            }
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                if (state.root != null && !state.searchActive) {
+                                    DropdownMenuItem(
+                                        text = { Text("Search") },
+                                        leadingIcon = { Icon(Icons.Filled.Search, null) },
+                                        onClick = { menuOpen = false; vm.openSearch() },
+                                    )
+                                }
+                                if (state.root != null || state.uri != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Close file") },
+                                        leadingIcon = { Icon(Icons.Filled.Close, null) },
+                                        onClick = { menuOpen = false; vm.closeFile() },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Open file…") },
+                                    onClick = {
+                                        menuOpen = false
+                                        openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
+                                    },
+                                )
+                                if (state.root != null) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (state.saving) "Saving…"
+                                                else if (state.dirty) "Save •"
+                                                else "Save"
+                                            )
+                                        },
+                                        enabled = state.dirty && !state.saving,
+                                        onClick = { menuOpen = false; vm.save() },
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    // Right: Undo + Redo as Canvas-drawn icons.
                     actions = {
                         if (state.root != null) {
-                            TextButton(
+                            IconButton(
                                 onClick = { vm.undo() },
                                 enabled = state.undoStack.isNotEmpty(),
-                            ) { Text("Undo") }
-                            TextButton(
+                            ) {
+                                val tint = LocalContentColor.current
+                                UndoRedoIcon(isRedo = false, tint = tint)
+                            }
+                            IconButton(
                                 onClick = { vm.redo() },
                                 enabled = state.redoStack.isNotEmpty(),
-                            ) { Text("Redo") }
-                        }
-                        if (state.root != null && !state.searchActive) {
-                            IconButton(onClick = { vm.openSearch() }) {
-                                Icon(Icons.Filled.Search, contentDescription = "Search")
+                            ) {
+                                val tint = LocalContentColor.current
+                                UndoRedoIcon(isRedo = true, tint = tint)
                             }
                         }
-                        if (state.root != null || state.uri != null) {
-                            IconButton(onClick = { vm.closeFile() }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Close file")
-                            }
-                        }
-                        TextButton(onClick = {
-                            openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
-                        }) { Text("Open") }
-                        TextButton(
-                            onClick = { vm.save() },
-                            enabled = state.dirty && !state.saving,
-                        ) { Text(if (state.saving) "Saving…" else "Save") }
-                    }
+                    },
                 )
                 if (state.searchActive) {
                     SearchBarRow(
@@ -286,6 +328,14 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
             onAddTag = { t -> vm.addTag(metaId, t) },
             onRemoveTag = { t -> vm.removeTag(metaId, t) },
             onDismiss = { vm.closeMetadata() },
+        )
+    }
+
+    if (quitDialogVisible) {
+        QuitConfirmDialog(
+            dirty = state.dirty,
+            onQuit = { activity?.finish() },
+            onCancel = { quitDialogVisible = false },
         )
     }
 }
@@ -542,6 +592,56 @@ private fun NotesToggle(expanded: Boolean, onClick: () -> Unit) {
             drawPath(path = path, color = color)
         }
     }
+}
+
+@Composable
+private fun UndoRedoIcon(isRedo: Boolean, tint: androidx.compose.ui.graphics.Color) {
+    // Draws a top-semicircle arc with a downward-pointing arrowhead at the open end.
+    // Undo (isRedo=false): arc runs right→top→left, arrowhead at left side.
+    // Redo (isRedo=true):  arc runs left→top→right, arrowhead at right side.
+    Canvas(Modifier.size(24.dp)) {
+        val sw = 2.dp.toPx()
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val r = size.width * 0.32f
+        val arrowSize = 3.5f.dp.toPx()
+
+        // Top semicircle.
+        // Undo: startAngle=0° (right), sweepAngle=-180° (CCW → right→top→left).
+        // Redo: startAngle=180° (left), sweepAngle=+180° (CW → left→top→right).
+        drawArc(
+            color = tint,
+            startAngle = if (isRedo) 180f else 0f,
+            sweepAngle = if (isRedo) 180f else -180f,
+            useCenter = false,
+            topLeft = androidx.compose.ui.geometry.Offset(cx - r, cy - r),
+            size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
+            style = Stroke(width = sw),
+        )
+
+        // Arrowhead: open V pointing downward at the open end of the arc.
+        // Undo open end is at (cx-r, cy); redo open end is at (cx+r, cy).
+        val tipX = if (isRedo) cx + r else cx - r
+        val path = Path()
+        path.moveTo(tipX - arrowSize, cy - arrowSize)
+        path.lineTo(tipX, cy + arrowSize)
+        path.lineTo(tipX + arrowSize, cy - arrowSize)
+        drawPath(path, tint, style = Stroke(width = sw))
+    }
+}
+
+@Composable
+private fun QuitConfirmDialog(dirty: Boolean, onQuit: () -> Unit, onCancel: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Quit orgdroid?") },
+        text = {
+            if (dirty) Text("You have unsaved changes that will be lost.")
+            else Text("Are you sure you want to quit?")
+        },
+        confirmButton = { TextButton(onClick = onQuit) { Text("Quit") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
 }
 
 @Composable
