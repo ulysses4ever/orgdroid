@@ -173,12 +173,22 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                             DropdownMenu(
                                 expanded = menuOpen,
                                 onDismissRequest = { menuOpen = false },
+                                modifier = Modifier.width(220.dp),
                             ) {
-                                if (state.root != null && !state.searchActive) {
+                                DropdownMenuItem(
+                                    text = { Text("Open file…") },
+                                    leadingIcon = { FolderIcon(tint = LocalContentColor.current) },
+                                    onClick = {
+                                        menuOpen = false
+                                        openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
+                                    },
+                                )
+                                if (state.root != null) {
                                     DropdownMenuItem(
-                                        text = { Text("Search") },
-                                        leadingIcon = { Icon(Icons.Filled.Search, null) },
-                                        onClick = { menuOpen = false; vm.openSearch() },
+                                        text = { Text(if (state.saving) "Saving…" else "Save") },
+                                        leadingIcon = { SaveIcon(tint = LocalContentColor.current) },
+                                        enabled = state.dirty && !state.saving,
+                                        onClick = { menuOpen = false; vm.save() },
                                     )
                                 }
                                 if (state.root != null || state.uri != null) {
@@ -188,24 +198,12 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                                         onClick = { menuOpen = false; vm.closeFile() },
                                     )
                                 }
-                                DropdownMenuItem(
-                                    text = { Text("Open file…") },
-                                    onClick = {
-                                        menuOpen = false
-                                        openLauncher.launch(arrayOf("text/*", "application/octet-stream"))
-                                    },
-                                )
-                                if (state.root != null) {
+                                if (state.root != null && !state.searchActive) {
+                                    HorizontalDivider()
                                     DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                if (state.saving) "Saving…"
-                                                else if (state.dirty) "Save •"
-                                                else "Save"
-                                            )
-                                        },
-                                        enabled = state.dirty && !state.saving,
-                                        onClick = { menuOpen = false; vm.save() },
+                                        text = { Text("Search") },
+                                        leadingIcon = { Icon(Icons.Filled.Search, null) },
+                                        onClick = { menuOpen = false; vm.openSearch() },
                                     )
                                 }
                             }
@@ -646,6 +644,35 @@ private fun OutlineCycleIcon(tint: androidx.compose.ui.graphics.Color) {
                 strokeWidth = sw,
             )
         }
+    }
+}
+
+@Composable
+private fun FolderIcon(tint: androidx.compose.ui.graphics.Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val sw = 2.dp.toPx()
+        val path = Path()
+        path.moveTo(3.dp.toPx(), 7.dp.toPx())
+        path.lineTo(9.dp.toPx(), 7.dp.toPx())
+        path.lineTo(11.dp.toPx(), 9.dp.toPx())
+        path.lineTo(21.dp.toPx(), 9.dp.toPx())
+        path.lineTo(21.dp.toPx(), 19.dp.toPx())
+        path.lineTo(3.dp.toPx(), 19.dp.toPx())
+        path.close()
+        drawPath(path, tint, style = Stroke(width = sw))
+    }
+}
+
+@Composable
+private fun SaveIcon(tint: androidx.compose.ui.graphics.Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val sw = 2.dp.toPx()
+        val cx = size.width / 2f
+        val a = 4.dp.toPx()
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(cx, 4.dp.toPx()), end = androidx.compose.ui.geometry.Offset(cx, 14.dp.toPx()), strokeWidth = sw)
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(cx - a, 10.dp.toPx()), end = androidx.compose.ui.geometry.Offset(cx, 14.dp.toPx()), strokeWidth = sw)
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(cx + a, 10.dp.toPx()), end = androidx.compose.ui.geometry.Offset(cx, 14.dp.toPx()), strokeWidth = sw)
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 19.dp.toPx()), end = androidx.compose.ui.geometry.Offset(20.dp.toPx(), 19.dp.toPx()), strokeWidth = sw)
     }
 }
 
