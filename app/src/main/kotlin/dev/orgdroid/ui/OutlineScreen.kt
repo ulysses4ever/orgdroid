@@ -154,6 +154,16 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                         }
                     },
                     actions = {
+                        if (state.root != null) {
+                            TextButton(
+                                onClick = { vm.undo() },
+                                enabled = state.undoStack.isNotEmpty(),
+                            ) { Text("Undo") }
+                            TextButton(
+                                onClick = { vm.redo() },
+                                enabled = state.redoStack.isNotEmpty(),
+                            ) { Text("Redo") }
+                        }
                         if (state.root != null && !state.searchActive) {
                             IconButton(onClick = { vm.openSearch() }) {
                                 Icon(Icons.Filled.Search, contentDescription = "Search")

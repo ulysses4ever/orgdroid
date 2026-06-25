@@ -39,6 +39,8 @@ data class OutlineState(
     val searchActive: Boolean = false,
     val searchQuery: String = "",
     val metadataSheetFor: NodeId? = null,
+    val undoStack: List<UndoSnapshot> = emptyList(),
+    val redoStack: List<UndoSnapshot> = emptyList(),
 )
 
 class OutlineViewModel(app: Application) : AndroidViewModel(app) {
@@ -47,6 +49,15 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
 
     private var nextNodeIdValue: Long = 1L
     private val store = RecentFilesStore(app)
+
+    private fun OutlineState.withSnapshot(): OutlineState {
+        val r = root ?: return this
+        val snap = UndoSnapshot(r, collapsed, focusedRoot, dirty)
+        return copy(
+            undoStack = UndoOps.push(undoStack, snap),
+            redoStack = emptyList(),
+        )
+    }
 
     init {
         val list = store.load()
@@ -149,12 +160,52 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(metadataSheetFor = null)
     }
 
+    fun undo() {
+        val s = _state.value
+        val snap = s.undoStack.lastOrNull() ?: return
+        val currentRoot = s.root ?: return
+        val currentSnap = UndoSnapshot(currentRoot, s.collapsed, s.focusedRoot, s.dirty)
+        _state.value = s.copy(
+            root = snap.root,
+            collapsed = snap.collapsed,
+            focusedRoot = snap.focusedRoot,
+            dirty = snap.dirty,
+            undoStack = s.undoStack.dropLast(1),
+            redoStack = (s.redoStack + currentSnap).takeLast(UndoOps.LIMIT),
+            editing = null,
+            editBuffer = "",
+            editingNotes = null,
+            notesBuffer = "",
+            metadataSheetFor = null,
+        )
+    }
+
+    fun redo() {
+        val s = _state.value
+        val snap = s.redoStack.lastOrNull() ?: return
+        val currentRoot = s.root ?: return
+        val currentSnap = UndoSnapshot(currentRoot, s.collapsed, s.focusedRoot, s.dirty)
+        _state.value = s.copy(
+            root = snap.root,
+            collapsed = snap.collapsed,
+            focusedRoot = snap.focusedRoot,
+            dirty = snap.dirty,
+            undoStack = (s.undoStack + currentSnap).takeLast(UndoOps.LIMIT),
+            redoStack = s.redoStack.dropLast(1),
+            editing = null,
+            editBuffer = "",
+            editingNotes = null,
+            notesBuffer = "",
+            metadataSheetFor = null,
+        )
+    }
+
     fun setPriority(id: NodeId, priority: Char?) {
         val s = _state.value
         val root = s.root ?: return
         val node = TreeOps.findNode(root, id) ?: return
         if (node.priority == priority) return
-        _state.value = s.copy(root = TreeOps.updatePriority(root, id, priority), dirty = true)
+        _state.value = s.withSnapshot().copy(root = TreeOps.updatePriority(root, id, priority), dirty = true)
     }
 
     fun addTag(id: NodeId, tag: String) {
@@ -162,7 +213,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         val node = TreeOps.findNode(root, id) ?: return
         if (tag in node.tags) return
-        _state.value = s.copy(
+        _state.value = s.withSnapshot().copy(
             root = TreeOps.updateTags(root, id, node.tags + tag),
             dirty = true,
         )
@@ -173,7 +224,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         val node = TreeOps.findNode(root, id) ?: return
         if (tag !in node.tags) return
-        _state.value = s.copy(
+        _state.value = s.withSnapshot().copy(
             root = TreeOps.updateTags(root, id, node.tags - tag),
             dirty = true,
         )
@@ -216,8 +267,8 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
             if (root != null) {
                 val node = TreeOps.findNode(root, editingId)
                 if (node != null && node.title != current.editBuffer) {
-                    current = current.copy(
-                        root = TreeOps.updateTitle(root, editingId, current.editBuffer),
+                    current = current.withSnapshot().copy(
+                        root = TreeOps.updateTitle(current.root!!, editingId, current.editBuffer),
                         dirty = true,
                     )
                 }
@@ -233,8 +284,8 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
                     val newNotes = if (current.notesBuffer.isEmpty()) emptyList()
                                    else current.notesBuffer.split('\n')
                     if (newNotes != node.notes) {
-                        current = current.copy(
-                            root = TreeOps.updateNotes(root, notesId, newNotes),
+                        current = current.withSnapshot().copy(
+                            root = TreeOps.updateNotes(current.root!!, notesId, newNotes),
                             dirty = true,
                         )
                     }
@@ -279,7 +330,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         TreeOps.findNode(root, id) ?: return
         val newRoot = TreeOps.cycleTodoState(root, id)
         if (newRoot === root) return
-        _state.value = s.copy(root = newRoot, dirty = true)
+        _state.value = s.withSnapshot().copy(root = newRoot, dirty = true)
     }
 
     fun createSiblingAfter(id: NodeId) {
@@ -287,7 +338,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val committed = commitEditInternal(s)
         val root = committed.root ?: return
         val (newRoot, newId) = TreeOps.insertSiblingAfter(root, id, nextNodeIdValue++)
-        _state.value = committed.copy(
+        _state.value = committed.withSnapshot().copy(
             root = newRoot,
             dirty = true,
             editing = newId,
@@ -321,7 +372,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             TreeOps.appendTopLevel(root, nextNodeIdValue++)
         }
-        _state.value = committed.copy(
+        _state.value = committed.withSnapshot().copy(
             root = newRoot,
             dirty = true,
             editing = newId,
@@ -335,7 +386,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         if (root.id == id) return
         val newRoot = TreeOps.delete(root, id)
         val validFocused = s.focusedRoot?.takeIf { TreeOps.findNode(newRoot, it) != null }
-        _state.value = s.copy(
+        _state.value = s.withSnapshot().copy(
             root = newRoot,
             dirty = true,
             editing = if (s.editing == id) null else s.editing,
@@ -353,7 +404,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         val newRoot = TreeOps.moveUp(root, id)
         if (newRoot === root) return
-        _state.value = s.copy(root = newRoot, dirty = true)
+        _state.value = s.withSnapshot().copy(root = newRoot, dirty = true)
     }
 
     fun moveDown(id: NodeId) {
@@ -361,7 +412,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         val newRoot = TreeOps.moveDown(root, id)
         if (newRoot === root) return
-        _state.value = s.copy(root = newRoot, dirty = true)
+        _state.value = s.withSnapshot().copy(root = newRoot, dirty = true)
     }
 
     fun indent(id: NodeId) {
@@ -369,7 +420,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         val newRoot = TreeOps.indent(root, id)
         if (newRoot === root) return
-        _state.value = s.copy(root = newRoot, dirty = true)
+        _state.value = s.withSnapshot().copy(root = newRoot, dirty = true)
     }
 
     fun outdent(id: NodeId) {
@@ -377,7 +428,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         val newRoot = TreeOps.outdent(root, id, focusedRoot = s.focusedRoot)
         if (newRoot === root) return
-        _state.value = s.copy(root = newRoot, dirty = true)
+        _state.value = s.withSnapshot().copy(root = newRoot, dirty = true)
     }
 
     fun zoomIn(id: NodeId) {
@@ -385,7 +436,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val root = s.root ?: return
         val node = TreeOps.findNode(root, id) ?: return
         if (node.children.isEmpty()) return
-        _state.value = s.copy(focusedRoot = id)
+        _state.value = s.withSnapshot().copy(focusedRoot = id)
     }
 
     fun zoomOut() {
@@ -394,7 +445,7 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
         val current = s.focusedRoot ?: return
         val parent = TreeOps.findParentAndIndex(root, current)?.first
         val newFocus = if (parent == null || parent.id == root.id) null else parent.id
-        _state.value = s.copy(focusedRoot = newFocus)
+        _state.value = s.withSnapshot().copy(focusedRoot = newFocus)
     }
 
     fun save() {
@@ -441,6 +492,8 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
                     notesBuffer = "",
                     collapsed = emptySet(),
                     conflictPending = false,
+                    undoStack = emptyList(),
+                    redoStack = emptyList(),
                 )
             } catch (t: Throwable) {
                 _state.value = _state.value.copy(error = t.message, conflictPending = false)
@@ -467,6 +520,8 @@ class OutlineViewModel(app: Application) : AndroidViewModel(app) {
                 dirty = false,
                 saving = false,
                 recents = updatedRecents,
+                undoStack = emptyList(),
+                redoStack = emptyList(),
             )
         } catch (t: Throwable) {
             _state.value = _state.value.copy(saving = false, error = t.message)
