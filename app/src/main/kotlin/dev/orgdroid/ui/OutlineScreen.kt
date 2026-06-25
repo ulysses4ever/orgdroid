@@ -486,23 +486,26 @@ private fun OutlineRow(
         } else if (item.node.notes.isNotEmpty()) {
             Row(
                 verticalAlignment = Alignment.Top,
-                modifier = Modifier.padding(start = 32.dp, top = 2.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 32.dp, top = 2.dp),
             ) {
-                CollapseToggle(
-                    isCollapsed = item.isNotesCollapsed,
-                    onClick = onToggleNotesCollapsed,
-                    size = 16.dp,
-                    iconSize = 7.dp,
-                )
                 if (!item.isNotesCollapsed) {
-                    Spacer(Modifier.size(4.dp))
                     Text(
                         text = item.node.notes.joinToString("\n"),
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { onBeginEditNotes() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onBeginEditNotes() },
                     )
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
+                CollapseToggle(
+                    isCollapsed = item.isNotesCollapsed,
+                    onClick = onToggleNotesCollapsed,
+                )
             }
         }
     }
@@ -560,31 +563,26 @@ private fun Bullet(hasChildren: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun CollapseToggle(
-    isCollapsed: Boolean,
-    onClick: () -> Unit,
-    size: androidx.compose.ui.unit.Dp = 24.dp,
-    iconSize: androidx.compose.ui.unit.Dp = 9.dp,
-) {
+private fun CollapseToggle(isCollapsed: Boolean, onClick: () -> Unit) {
     val color = MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         Modifier
-            .size(size)
+            .size(24.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(iconSize)) {
+        Canvas(Modifier.size(9.dp)) {
             val path = Path()
             if (isCollapsed) {
                 // ▶ right-pointing (collapsed — tap to expand)
                 path.moveTo(0f, 0f)
-                path.lineTo(this.size.width, this.size.height / 2f)
-                path.lineTo(0f, this.size.height)
+                path.lineTo(size.width, size.height / 2f)
+                path.lineTo(0f, size.height)
             } else {
                 // ▼ down-pointing (expanded — tap to collapse)
                 path.moveTo(0f, 0f)
-                path.lineTo(this.size.width, 0f)
-                path.lineTo(this.size.width / 2f, this.size.height)
+                path.lineTo(size.width, 0f)
+                path.lineTo(size.width / 2f, size.height)
             }
             path.close()
             drawPath(path = path, color = color)
