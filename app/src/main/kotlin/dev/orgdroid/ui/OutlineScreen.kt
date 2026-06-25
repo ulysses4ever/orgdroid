@@ -58,7 +58,6 @@ private data class RenderItem(
     val canOutdent: Boolean,
     val canMoveUp: Boolean,
     val canMoveDown: Boolean,
-    val isNotesExpanded: Boolean,
 )
 
 private fun flatten(
@@ -66,7 +65,6 @@ private fun flatten(
     collapsed: Set<NodeId>,
     focusedRoot: NodeId?,
     visibleIds: Set<NodeId>,
-    notesExpanded: Set<NodeId>,
 ): List<RenderItem> {
     if (root == null) return emptyList()
     val startNode = if (focusedRoot != null) TreeOps.findNode(root, focusedRoot) else root
@@ -88,7 +86,6 @@ private fun flatten(
                     canOutdent = parent.id != startNode.id,
                     canMoveUp = indexInParent > 0,
                     canMoveDown = indexInParent < parent.children.size - 1,
-                    isNotesExpanded = node.id in notesExpanded,
                 )
             )
         }
@@ -131,8 +128,8 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
         }
     }
 
-    val items by remember(state.root, state.collapsed, state.focusedRoot, visibleIds, state.notesExpanded) {
-        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot, visibleIds, state.notesExpanded) }
+    val items by remember(state.root, state.collapsed, state.focusedRoot, visibleIds) {
+        derivedStateOf { flatten(state.root, state.collapsed, state.focusedRoot, visibleIds) }
     }
 
     val listState = rememberLazyListState()
@@ -293,7 +290,6 @@ fun OutlineScreen(vm: OutlineViewModel = viewModel()) {
                                     onMoveUp = { vm.moveUp(item.node.id) },
                                     onMoveDown = { vm.moveDown(item.node.id) },
                                     onEditMetadata = { vm.openMetadata(item.node.id) },
-                                    onToggleNotesExpanded = { vm.toggleNotesExpanded(item.node.id) },
                                 )
                             }
                         }
@@ -363,7 +359,6 @@ private fun OutlineRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onEditMetadata: () -> Unit,
-    onToggleNotesExpanded: () -> Unit,
 ) {
     val titleFocusRequester = remember { FocusRequester() }
     val notesFocusRequester = remember { FocusRequester() }
@@ -380,11 +375,7 @@ private fun OutlineRow(
             .padding(start = (item.depth * 20).dp, top = 4.dp, bottom = 4.dp, end = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Bullet(
-                hasChildren = item.hasChildren,
-                isCollapsed = item.isCollapsed,
-                onClick = onToggle,
-            )
+            Bullet(hasChildren = item.hasChildren)
             Spacer(Modifier.size(8.dp))
             Box(Modifier.weight(1f)) {
                 if (editing) {
@@ -468,6 +459,10 @@ private fun OutlineRow(
                     }
                 }
             }
+            val canCollapse = item.hasChildren || item.node.notes.isNotEmpty()
+            if (canCollapse) {
+                CollapseToggle(isCollapsed = item.isCollapsed, onClick = onToggle)
+            }
         }
         if (editingNotes) {
             BasicTextField(
@@ -484,31 +479,15 @@ private fun OutlineRow(
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             )
-        } else if (item.node.notes.isNotEmpty()) {
-            val multiLine = item.node.notes.size > 1
-            Row(
-                verticalAlignment = Alignment.Top,
-                modifier = Modifier.padding(start = 32.dp, top = 2.dp),
-            ) {
-                if (multiLine) {
-                    NotesToggle(
-                        expanded = item.isNotesExpanded,
-                        onClick = onToggleNotesExpanded,
-                    )
-                    Spacer(Modifier.size(4.dp))
-                }
-                val displayText = if (multiLine && !item.isNotesExpanded) {
-                    item.node.notes.first() + " …"
-                } else {
-                    item.node.notes.joinToString("\n")
-                }
-                Text(
-                    text = displayText,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.clickable { onBeginEditNotes() },
-                )
-            }
+        } else if (item.node.notes.isNotEmpty() && !item.isCollapsed) {
+            Text(
+                text = item.node.notes.joinToString("\n"),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(start = 32.dp, top = 2.dp)
+                    .clickable { onBeginEditNotes() },
+            )
         }
     }
 }
@@ -546,18 +525,12 @@ private fun TitleRow(
 }
 
 @Composable
-private fun Bullet(hasChildren: Boolean, isCollapsed: Boolean, onClick: () -> Unit) {
+private fun Bullet(hasChildren: Boolean) {
     val color = MaterialTheme.colorScheme.onSurface
-    Box(
-        Modifier
-            .size(24.dp)
-            .clickable(enabled = hasChildren, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.size(if (hasChildren && isCollapsed) 14.dp else 8.dp)) {
-            if (hasChildren && isCollapsed) {
+    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(if (hasChildren) 10.dp else 7.dp)) {
+            if (hasChildren) {
                 drawCircle(color = color, radius = size.minDimension / 2, style = Stroke(width = 2.dp.toPx()))
-                drawCircle(color = color, radius = size.minDimension / 5)
             } else {
                 drawCircle(color = color, radius = size.minDimension / 2)
             }
@@ -566,24 +539,26 @@ private fun Bullet(hasChildren: Boolean, isCollapsed: Boolean, onClick: () -> Un
 }
 
 @Composable
-private fun NotesToggle(expanded: Boolean, onClick: () -> Unit) {
+private fun CollapseToggle(isCollapsed: Boolean, onClick: () -> Unit) {
     val color = MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         Modifier
-            .size(16.dp)
+            .size(24.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(8.dp)) {
+        Canvas(Modifier.size(9.dp)) {
             val path = Path()
-            if (expanded) {
-                path.moveTo(0f, 0f)
-                path.lineTo(size.width, 0f)
-                path.lineTo(size.width / 2f, size.height)
-            } else {
+            if (isCollapsed) {
+                // ▶ right-pointing (collapsed — tap to expand)
                 path.moveTo(0f, 0f)
                 path.lineTo(size.width, size.height / 2f)
                 path.lineTo(0f, size.height)
+            } else {
+                // ▼ down-pointing (expanded — tap to collapse)
+                path.moveTo(0f, 0f)
+                path.lineTo(size.width, 0f)
+                path.lineTo(size.width / 2f, size.height)
             }
             path.close()
             drawPath(path = path, color = color)
