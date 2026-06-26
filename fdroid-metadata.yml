@@ -1,0 +1,32 @@
+Categories:
+  - Writing
+License: GPL-3.0-only
+AuthorName: Artem Pelenitsyn
+AuthorEmail: a.pelenitsyn@gmail.com
+WebSite: https://github.com/ulysses4ever/orgdroid
+SourceCode: https://github.com/ulysses4ever/orgdroid
+IssueTracker: https://github.com/ulysses4ever/orgdroid/issues
+
+AutoName: orgdroid
+Summary: Outline editor for Emacs .org files
+Description: |-
+    A Workflowy-style hierarchical outline editor that reads and writes
+    standard Emacs .org files. Open any .org file via the system file
+    picker; edit headings, notes, TODO states, priorities, and tags;
+    save back in place.
+
+RepoType: git
+Repo: https://github.com/ulysses4ever/orgdroid
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    commit: v0.1.0
+    subdir: app
+    gradle:
+      - yes
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1
