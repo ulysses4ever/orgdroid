@@ -55,3 +55,8 @@ app/src/test/kotlin/dev/orgdroid/
 ## Status
 
 M1–M10 shipped. See `TODO.md` for known rough edges and deferred polish.
+
+## License
+
+Licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE)
+for the full text.
